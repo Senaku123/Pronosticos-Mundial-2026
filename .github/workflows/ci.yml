@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Sync dependencies (from lockfile)
+        run: uv sync --all-groups
+      - name: Ruff (lint + format check)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Mypy (type check)
+        run: uv run mypy src
+      - name: Pytest
+        run: uv run pytest
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wc26
+          POSTGRES_PASSWORD: change_me
+          POSTGRES_DB: wc26_forecast
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U wc26 -d wc26_forecast"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Sync dependencies
+        run: uv sync --all-groups
+      - name: Apply migrations (alembic upgrade head)
+        env:
+          DATABASE_URL: postgresql+psycopg://wc26:change_me@localhost:5432/wc26_forecast
+        run: uv run alembic upgrade head

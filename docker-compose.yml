@@ -1,0 +1,25 @@
+# Minimal compose: ONLY PostgreSQL (the real database). DataGrip connects as a client.
+# The API, scripts and notebooks run natively on the host during development
+# (see docs/PROJECT_BLUEPRINT.md and docs/DEVELOPMENT.md). The app is NOT containerized
+# until there is a real deployment.
+
+services:
+  db:
+    image: postgres:16
+    container_name: wc26_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wc26}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-wc26_forecast}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - wc26_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wc26} -d ${POSTGRES_DB:-wc26_forecast}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  wc26_pgdata:
