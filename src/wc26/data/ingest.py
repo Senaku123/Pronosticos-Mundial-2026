@@ -23,15 +23,24 @@ from wc26.data.validation import validate_results
 from wc26.database.models import DataSource, IngestionRun, Match, Team, Tournament
 
 _TRUTHY = {"TRUE", "T", "1", "YES"}
+_FALSY = {"FALSE", "F", "0", "NO"}
 
 # Max match rows per INSERT (~11 columns each) to stay under PostgreSQL's 65535-param limit.
 _MATCH_INSERT_CHUNK = 5000
 
 
 def load_results(path: str | Path) -> pd.DataFrame:
-    """Read results.csv and normalize the ``neutral`` flag to a real boolean."""
+    """Read results.csv and normalize the ``neutral`` flag to a real boolean.
+
+    Raises on any unrecognized/missing ``neutral`` value instead of silently coercing it to
+    False (which would corrupt home advantage in the Elo and features).
+    """
     df = pd.read_csv(path)
-    df["neutral"] = df["neutral"].astype(str).str.strip().str.upper().isin(_TRUTHY)
+    raw = df["neutral"].astype(str).str.strip().str.upper()
+    unknown = set(raw.unique()) - _TRUTHY - _FALSY
+    if unknown:
+        raise ValueError(f"unrecognized 'neutral' values (missing or corrupt): {sorted(unknown)}")
+    df["neutral"] = raw.isin(_TRUTHY)
     return df
 
 

@@ -247,3 +247,49 @@ class MatchFeature(Base):
     is_neutral: Mapped[bool] = mapped_column(Boolean)
 
     __table_args__ = (UniqueConstraint("match_id", name="uq_match_features_match"),)
+
+
+class ModelRun(Base):
+    """One run of one model/baseline, with reproducibility metadata (addendum §8)."""
+
+    __tablename__ = "model_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(80), unique=True)
+    model_name: Mapped[str] = mapped_column(String(50))
+    model_version: Mapped[str] = mapped_column(String(20))
+    git_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    data_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cutoff_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    random_seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    python_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    package_lock: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    config_json: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class MatchPrediction(Base):
+    """Per-match W/D/L (and optional expected goals / most-likely score) for a model run.
+
+    W/D/L is the single source of truth derived per model: a baseline writes it directly; the
+    Dixon-Coles scoreline model (Phase 7) derives it by summing zones of its matrix (addendum §2).
+    """
+
+    __tablename__ = "match_predictions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_run_id: Mapped[int] = mapped_column(ForeignKey("model_runs.id", ondelete="CASCADE"))
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"))
+    p_home_win: Mapped[float] = mapped_column(Float)
+    p_draw: Mapped[float] = mapped_column(Float)
+    p_away_win: Mapped[float] = mapped_column(Float)
+    expected_goals_home: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_goals_away: Mapped[float | None] = mapped_column(Float, nullable=True)
+    predicted_home_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    predicted_away_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("model_run_id", "match_id", name="uq_match_predictions_run_match"),
+    )

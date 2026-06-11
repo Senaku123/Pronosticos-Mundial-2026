@@ -121,6 +121,12 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 6 — Baseline models
 
+> **Estado: implementada (2026-06-11).** Tablas `model_runs` + `match_predictions`. Baselines
+> `naive_favorite`, `elo_only`, `simple_poisson` (Elo→Poisson→matriz→W/D/L+marcador), predichos
+> sobre los 49.403 partidos (148.209 predicciones). Primer pronóstico del Mundial 2026 (72 fixtures,
+> con barra `tqdm`) generado. `fifa_ranking_baseline` diferido (sin datos de ranking FIFA).
+> La evaluación formal (log loss/Brier/calibración) y el go/no-go son Phase 8.
+
 - **Objetivo:** baselines obligatorios como piso de comparación.
 - **Entregables:** `elo_only_baseline`, `fifa_ranking_baseline`, `simple_poisson_baseline`,
   `naive_favorite_baseline`; registrados como `model_runs`.
