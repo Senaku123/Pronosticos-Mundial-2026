@@ -320,3 +320,23 @@ class ScorelineProbability(Base):
             name="uq_scoreline_run_match_score",
         ),
     )
+
+
+class CalibrationCurve(Base):
+    """Reliability bins for a model run, by outcome class and raw/calibrated, on a test split.
+
+    Lets the calibration be inspected and audited (predicted vs observed per bin) instead of
+    recomputed at view time (addendum §2 / Phase 7b).
+    """
+
+    __tablename__ = "calibration_curves"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_run_id: Mapped[int] = mapped_column(ForeignKey("model_runs.id", ondelete="CASCADE"))
+    outcome_class: Mapped[str] = mapped_column(String(10))  # home | draw | away
+    calibration: Mapped[str] = mapped_column(String(10))  # raw | calibrated
+    split: Mapped[str] = mapped_column(String(10))  # train | test
+    bin_index: Mapped[int] = mapped_column(Integer)
+    mean_predicted: Mapped[float] = mapped_column(Float)
+    observed_frequency: Mapped[float] = mapped_column(Float)
+    sample_count: Mapped[int] = mapped_column(Integer)
