@@ -159,6 +159,13 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 8 — Match-level backtesting + GO/NO-GO gate
 
+> **Estado: implementada (2026-06-11). VEREDICTO: GO ✅.** Backtest out-of-time (test ≥2018,
+> n=8107). `dixon_coles_calibrated` vs baseline `elo_only`: log loss 0.873 vs 0.895, Brier 0.514 vs
+> 0.522, RPS 0.171 vs 0.172, ECE 0.021 vs 0.046 — y bootstrap pareado significativo (mean diff
+> −0.021, CI [−0.026,−0.017], p=0.0000). **Dato clave:** el DC crudo NO supera a Elo-only
+> (skill −0.049); **solo el calibrado** lo hace → valida la capa de calibración. Tablas
+> `backtest_runs`/`backtest_metrics`. Luz verde para frontend/V2.
+
 - **Objetivo:** seleccionar modelo y validar contra baselines (criterio principal).
 - **Entregables:** walk-forward expanding-window; métricas (log loss, Brier, RPS, calibración);
   skill score vs Elo-only; tests pareados (Diebold-Mariano/bootstrap); `backtest_runs`/

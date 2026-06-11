@@ -340,3 +340,39 @@ class CalibrationCurve(Base):
     mean_predicted: Mapped[float] = mapped_column(Float)
     observed_frequency: Mapped[float] = mapped_column(Float)
     sample_count: Mapped[int] = mapped_column(Integer)
+
+
+class BacktestRun(Base):
+    """One match-level (or tournament/live) backtest evaluation (addendum §3, §4)."""
+
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(80), unique=True)
+    backtest_level: Mapped[str] = mapped_column(String(12))  # match | tournament | live
+    test_from: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    n_matches: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    git_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    python_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    config_json: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class BacktestMetric(Base):
+    """One metric value for one model within a backtest run (long format)."""
+
+    __tablename__ = "backtest_metrics"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    backtest_run_id: Mapped[int] = mapped_column(ForeignKey("backtest_runs.id", ondelete="CASCADE"))
+    model_name: Mapped[str] = mapped_column(String(40))
+    metric: Mapped[str] = mapped_column(String(40))
+    value: Mapped[float] = mapped_column(Float)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "backtest_run_id", "model_name", "metric", name="uq_backtest_metrics_run_model_metric"
+        ),
+    )
