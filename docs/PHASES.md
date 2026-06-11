@@ -84,6 +84,12 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 4 — Temporal cutoff logic, internal Elo & point-in-time feature store
 
+> **Estado: implementada (2026-06-11).** Elo interno recalculado sobre 49.403 partidos jugados
+> (98.806 ratings pre/post), corte estricto `match_date < cutoff`, lookup *as-of* y
+> `test_no_future_leakage` (causalidad probada). Top activos plausibles (Spain, Argentina, France…).
+> `rankings` (FIFA, serie bitemporal) queda como fuente externa opcional/posterior; en V1 la fuerza
+> la da el Elo interno.
+
 - **Objetivo:** mecánica anti-leakage (el corazón metodológico).
 - **Entregables:** `elo_ratings` (Elo **interno** pre/post-match); `rankings` como serie bitemporal;
   feature store *as-of cutoff*; `test_no_future_leakage`.

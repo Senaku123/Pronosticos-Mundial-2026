@@ -184,3 +184,24 @@ class TeamAlias(Base):
     __table_args__ = (
         UniqueConstraint("source_name", "raw_name", name="uq_team_aliases_source_raw"),
     )
+
+
+class EloRating(Base):
+    """Internally-recomputed Elo rating, one row per (team, match) (addendum §1).
+
+    Stores the team's rating BEFORE the match (``rating_pre``, the leakage-safe strength used
+    for prediction) and AFTER (``rating_post``). The strength of a team as-of any date is the
+    ``rating_post`` of its most recent match strictly before that date.
+    """
+
+    __tablename__ = "elo_ratings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"))
+    match_date: Mapped[dt.date] = mapped_column(Date)
+    rating_pre: Mapped[float] = mapped_column(Float)
+    rating_post: Mapped[float] = mapped_column(Float)
+    is_home: Mapped[bool] = mapped_column(Boolean)
+
+    __table_args__ = (UniqueConstraint("team_id", "match_id", name="uq_elo_ratings_team_match"),)
