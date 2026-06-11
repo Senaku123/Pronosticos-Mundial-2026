@@ -49,7 +49,7 @@ def classify_tournament(name: str) -> str:
         return "qualifier"
     if "nations league" in n:
         return "nations_league"
-    if n == "fifa world cup":
+    if "fifa world cup" in n:  # qualifiers were already routed above
         return "world_cup"
     if any(key in n for key in _CONTINENTAL_KEYS):
         return "continental_cup"

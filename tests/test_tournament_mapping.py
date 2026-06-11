@@ -9,6 +9,7 @@ def test_classify_categories() -> None:
     cases = {
         "Friendly": "friendly",
         "FIFA World Cup": "world_cup",
+        "FIFA World Cup 2026": "world_cup",  # robust to a year/suffix
         "FIFA World Cup qualification": "qualifier",
         "UEFA Euro": "continental_cup",
         "UEFA Euro qualification": "qualifier",
