@@ -65,6 +65,11 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 3 — Team identity resolution & tournament mapping
 
+> **Estado: implementada (2026-06-11).** Verificado: 200 tournaments mapeados (unmapped=0), 36
+> aliases + 36 identity periods sembrados desde `former_names.csv` (idempotente). La colapsación
+> física de la atribución histórica de partidos (p. ej. unir "West Germany" en "Germany") queda
+> **diferida y documentada** como decisión backtesteable (addendum §10).
+
 - **Objetivo:** identidad temporal de equipos y normalización de torneos.
 - **Entregables:** `team_aliases`, `team_identity_periods`; `tournament_mapping` versionado
   (categorías `world_cup|continental_cup|qualifier|nations_league|friendly|other`); limpieza de

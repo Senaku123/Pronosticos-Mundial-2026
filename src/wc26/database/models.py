@@ -14,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -126,3 +127,60 @@ class IngestionRun(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TournamentMapping(Base):
+    """Maps a raw free-text tournament label to a clean category + weight (addendum §11).
+
+    Weights are NOT final: they are a starting hypothesis to be validated by backtesting
+    (see docs/METHODOLOGY_ADDENDUM.md §11 and docs/BACKTESTING_STRATEGY.md).
+    """
+
+    __tablename__ = "tournament_mapping"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    raw_tournament: Mapped[str] = mapped_column(String(150), unique=True)
+    tournament_category: Mapped[str] = mapped_column(String(20))
+    match_importance_weight: Mapped[float] = mapped_column(Float)
+    confederation_scope: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_official: Mapped[bool] = mapped_column(Boolean, default=True)
+    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    mapping_version: Mapped[str] = mapped_column(String(20))
+
+
+class TeamIdentityPeriod(Base):
+    """A named period of a national team's stable identity (addendum §10).
+
+    Models historical name/identity changes (e.g. West Germany -> Germany) with validity
+    dates. Succession policy is documented in docs/METHODOLOGY_ADDENDUM.md §10.
+    """
+
+    __tablename__ = "team_identity_periods"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))
+    fifa_code: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    valid_from: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    valid_to: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("team_id", "name", name="uq_team_identity_periods_team_name"),
+    )
+
+
+class TeamAlias(Base):
+    """Maps a source-specific raw team name to a canonical team (addendum §10)."""
+
+    __tablename__ = "team_aliases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    source_name: Mapped[str] = mapped_column(String(50))
+    raw_name: Mapped[str] = mapped_column(String(100))
+    mapping_version: Mapped[str] = mapped_column(String(20))
+
+    __table_args__ = (
+        UniqueConstraint("source_name", "raw_name", name="uq_team_aliases_source_raw"),
+    )

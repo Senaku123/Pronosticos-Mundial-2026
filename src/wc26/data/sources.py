@@ -41,6 +41,16 @@ OPENFOOTBALL_WORLDCUP = SourceSpec(
     tos_notes="Public domain (CC0). Manual commit updates (~1/day), not live. Verified 2026-06-11.",
 )
 
+# Historical team name changes (e.g. West Germany -> Germany). CC0, same dataset as results.
+MARTJ42_FORMER_NAMES = SourceSpec(
+    name="martj42_former_names",
+    url="https://raw.githubusercontent.com/martj42/international_results/master/former_names.csv",
+    license="CC0-1.0",
+    upstream_source="martj42/international_results (GitHub)",
+    upstream_license="CC0-1.0",
+    tos_notes="Public domain (CC0). Team name changes. Verified 2026-06-11.",
+)
+
 REGISTRY: dict[str, SourceSpec] = {
-    spec.name: spec for spec in (MARTJ42_RESULTS, OPENFOOTBALL_WORLDCUP)
+    spec.name: spec for spec in (MARTJ42_RESULTS, OPENFOOTBALL_WORLDCUP, MARTJ42_FORMER_NAMES)
 }
