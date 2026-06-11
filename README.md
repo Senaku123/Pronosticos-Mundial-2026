@@ -66,6 +66,7 @@ scripts/
 
 ## Documentation
 
+- [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) — reproducible setup, from zero to loaded data.
 - [`docs/PROJECT_BLUEPRINT.md`](docs/PROJECT_BLUEPRINT.md) — core project document (Spanish).
 - [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) — modeling methodology and anti-leakage rules.
 - [`docs/BACKTESTING_STRATEGY.md`](docs/BACKTESTING_STRATEGY.md) — two-level backtesting + live scoring.

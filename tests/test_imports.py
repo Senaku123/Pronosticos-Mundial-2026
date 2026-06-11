@@ -14,9 +14,7 @@ def test_core_modules_import() -> None:
     from wc26.utils import config, hashing, seeds
 
     # Core ORM tables are registered on the shared metadata.
-    assert {"confederations", "teams", "tournaments", "matches"} <= set(
-        base.Base.metadata.tables
-    )
+    assert {"confederations", "teams", "tournaments", "matches"} <= set(base.Base.metadata.tables)
     assert models.Match.__tablename__ == "matches"
     assert hasattr(config, "get_settings")
     assert hasattr(hashing, "sha256_file")

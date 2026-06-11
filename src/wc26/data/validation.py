@@ -7,7 +7,7 @@ so identity/leakage errors surface early instead of deep in the backtest (Phase 
 from __future__ import annotations
 
 import pandas as pd
-import pandera as pa
+import pandera.pandas as pa
 
 # Schema for martj42 results.csv: exactly 9 columns, teams/tournament non-null,
 # scores non-negative (nullable to tolerate future fixtures), neutral as boolean.

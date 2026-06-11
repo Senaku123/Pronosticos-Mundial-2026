@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pandas as pd
-import pandera as pa
 import pytest
+from pandera.errors import SchemaErrors
 
 from wc26.data.validation import validate_results
 
@@ -32,19 +32,19 @@ def test_valid_frame_passes() -> None:
 
 def test_missing_column_fails() -> None:
     df = _valid_frame().drop(columns=["neutral"])
-    with pytest.raises(pa.errors.SchemaErrors):
+    with pytest.raises(SchemaErrors):
         validate_results(df)
 
 
 def test_null_home_team_fails() -> None:
     df = _valid_frame()
     df.loc[0, "home_team"] = None
-    with pytest.raises(pa.errors.SchemaErrors):
+    with pytest.raises(SchemaErrors):
         validate_results(df)
 
 
 def test_negative_score_fails() -> None:
     df = _valid_frame()
     df.loc[0, "home_score"] = -1
-    with pytest.raises(pa.errors.SchemaErrors):
+    with pytest.raises(SchemaErrors):
         validate_results(df)

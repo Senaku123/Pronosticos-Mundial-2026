@@ -1,6 +1,8 @@
 # DEVELOPMENT — local setup
 
 > Guía de entorno local (ES). Comandos e identificadores en inglés.
+> Para la guía completa paso a paso (incluida la carga de datos y DataGrip), ver
+> [`GETTING_STARTED.md`](GETTING_STARTED.md).
 
 ## Requisitos
 

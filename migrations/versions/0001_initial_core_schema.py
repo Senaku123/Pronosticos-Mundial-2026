@@ -39,9 +39,7 @@ def upgrade() -> None:
         sa.Column("confederation_id", sa.Integer(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("canonical_name", name="uq_teams_canonical_name"),
-        sa.ForeignKeyConstraint(
-            ["confederation_id"], ["confederations.id"], ondelete="SET NULL"
-        ),
+        sa.ForeignKeyConstraint(["confederation_id"], ["confederations.id"], ondelete="SET NULL"),
     )
 
     op.create_table(

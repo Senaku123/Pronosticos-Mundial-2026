@@ -53,10 +53,11 @@ strict = true
 module = ["pandas.*", "pandera.*"]
 ignore_missing_imports = true
 
-# The data module is pandas-heavy; relax "returning Any" noise there only.
+# The data module wraps untyped pandas/pandera calls; relax related noise there only.
 [[tool.mypy.overrides]]
 module = "wc26.data.*"
 warn_return_any = false
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

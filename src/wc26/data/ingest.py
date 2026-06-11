@@ -24,6 +24,9 @@ from wc26.database.models import DataSource, IngestionRun, Match, Team, Tourname
 
 _TRUTHY = {"TRUE", "T", "1", "YES"}
 
+# Max match rows per INSERT (~11 columns each) to stay under PostgreSQL's 65535-param limit.
+_MATCH_INSERT_CHUNK = 5000
+
 
 def load_results(path: str | Path) -> pd.DataFrame:
     """Read results.csv and normalize the ``neutral`` flag to a real boolean."""
@@ -32,13 +35,13 @@ def load_results(path: str | Path) -> pd.DataFrame:
     return df
 
 
-def _to_int(value: object) -> int | None:
+def _to_int(value: float | int | str | None) -> int | None:
     """Convert a possibly-missing numeric cell to int or None."""
     if value is None:
         return None
     if isinstance(value, float) and math.isnan(value):
         return None
-    return int(value)  # type: ignore[arg-type]
+    return int(value)
 
 
 def _to_str(value: object) -> str | None:
@@ -123,10 +126,16 @@ def upsert_matches(
     ]
     if not records:
         return 0
-    result = session.execute(
-        pg_insert(Match).values(records).on_conflict_do_nothing(constraint="uq_matches_natural")
-    )
-    return result.rowcount or 0
+    # Chunk inserts to stay under PostgreSQL's 65535 bound parameters per statement
+    # (each match row binds ~11 columns).
+    inserted = 0
+    for start in range(0, len(records), _MATCH_INSERT_CHUNK):
+        chunk = records[start : start + _MATCH_INSERT_CHUNK]
+        result = session.execute(
+            pg_insert(Match).values(chunk).on_conflict_do_nothing(constraint="uq_matches_natural")
+        )
+        inserted += result.rowcount or 0  # type: ignore[attr-defined]  # CursorResult at runtime
+    return inserted
 
 
 def ingest_results(
@@ -137,9 +146,7 @@ def ingest_results(
     file_hash: str = "",
 ) -> IngestionRun:
     """Validate and idempotently ingest a results snapshot, recording the ingestion run."""
-    source = session.execute(
-        select(DataSource).where(DataSource.name == source_name)
-    ).scalar_one()
+    source = session.execute(select(DataSource).where(DataSource.name == source_name)).scalar_one()
 
     df = validate_results(load_results(csv_path))
 
