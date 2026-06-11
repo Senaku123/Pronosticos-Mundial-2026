@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+from collections import defaultdict
 from dataclasses import dataclass
+from itertools import groupby
 
 BASE_RATING = 1500.0
 
@@ -80,44 +82,98 @@ def _result_for_home(home_score: int, away_score: int) -> float:
     return 0.5
 
 
+def predict_expected(
+    home_rating: float,
+    away_rating: float,
+    neutral: bool,
+    config: EloConfig | None = None,
+) -> float:
+    """Home-team expected score, re-applying home advantage exactly as in training.
+
+    Use this (never bare ``expected_score`` on raw ratings) when predicting a match from
+    as-of ratings, so the home advantage is applied consistently with ``compute_elo_history``.
+    """
+    cfg = config or EloConfig()
+    home_field = 0.0 if neutral else cfg.home_advantage
+    return expected_score(home_rating + home_field, away_rating)
+
+
 def compute_elo_history(
     matches: list[MatchInput], config: EloConfig | None = None
 ) -> list[EloRecord]:
-    """Replay matches in the given order and return the full per-team rating history.
+    """Replay matches chronologically and return the full per-team rating history.
 
-    Callers MUST pass matches sorted chronologically (and deterministically tie-broken).
-    For each match, the stored ``rating_pre`` is the team's intrinsic rating BEFORE the match
-    (i.e. the ``rating_post`` of its previous match), which is the only leakage-safe strength.
+    The matches MUST be sorted by non-decreasing ``match_date`` (a ``ValueError`` is raised
+    otherwise). Because the data has only day granularity (no kickoff time), each day is
+    processed **atomically**: every match on a day uses that day's *start* ratings as its
+    ``rating_pre``, and each team's same-day deltas are applied together at day end. This means:
+
+    - ``rating_pre`` depends ONLY on strictly-earlier days (no same-day leakage, even for the
+      138 cases where a team plays twice in one day), and exactly equals ``get_rating_as_of``;
+    - ``rating_post`` is the team's end-of-day rating (consumed only by strictly-later days).
+
+    Sequential replay also makes earlier records immutable to later matches, so a full-history
+    seed yields the same as-of ratings as any per-cutoff seed (no per-cutoff reseed needed).
     """
     cfg = config or EloConfig()
+
+    previous_date: dt.date | None = None
+    for m in matches:
+        if previous_date is not None and m.match_date < previous_date:
+            raise ValueError(
+                f"matches must be sorted by non-decreasing match_date; "
+                f"{m.match_date} follows {previous_date}"
+            )
+        previous_date = m.match_date
+
     ratings: dict[int, float] = {}
     records: list[EloRecord] = []
 
-    for m in matches:
-        home_pre = ratings.get(m.home_team_id, cfg.base_rating)
-        away_pre = ratings.get(m.away_team_id, cfg.base_rating)
+    for _day, group in groupby(matches, key=lambda m: m.match_date):
+        day_matches = list(group)
+        day_start = {
+            team: ratings.get(team, cfg.base_rating)
+            for m in day_matches
+            for team in (m.home_team_id, m.away_team_id)
+        }
+        deltas: defaultdict[int, float] = defaultdict(float)
+        for m in day_matches:
+            home_field = 0.0 if m.neutral else cfg.home_advantage
+            expected_home = expected_score(
+                day_start[m.home_team_id] + home_field, day_start[m.away_team_id]
+            )
+            result_home = _result_for_home(m.home_score, m.away_score)
+            k = (
+                cfg.base_k
+                * m.importance_weight
+                * goal_difference_multiplier(m.home_score - m.away_score)
+            )
+            delta = k * (result_home - expected_home)
+            deltas[m.home_team_id] += delta
+            deltas[m.away_team_id] -= delta
 
-        home_field = 0.0 if m.neutral else cfg.home_advantage
-        expected_home = expected_score(home_pre + home_field, away_pre)
-
-        result_home = _result_for_home(m.home_score, m.away_score)
-        k = (
-            cfg.base_k
-            * m.importance_weight
-            * goal_difference_multiplier(m.home_score - m.away_score)
-        )
-        delta = k * (result_home - expected_home)
-
-        home_post = home_pre + delta
-        away_post = away_pre - delta
-        ratings[m.home_team_id] = home_post
-        ratings[m.away_team_id] = away_post
-
-        records.append(
-            EloRecord(m.match_id, m.home_team_id, m.match_date, home_pre, home_post, True)
-        )
-        records.append(
-            EloRecord(m.match_id, m.away_team_id, m.match_date, away_pre, away_post, False)
-        )
+        day_end = {team: day_start[team] + deltas[team] for team in day_start}
+        for m in day_matches:
+            records.append(
+                EloRecord(
+                    m.match_id,
+                    m.home_team_id,
+                    m.match_date,
+                    day_start[m.home_team_id],
+                    day_end[m.home_team_id],
+                    True,
+                )
+            )
+            records.append(
+                EloRecord(
+                    m.match_id,
+                    m.away_team_id,
+                    m.match_date,
+                    day_start[m.away_team_id],
+                    day_end[m.away_team_id],
+                    False,
+                )
+            )
+        ratings.update(day_end)
 
     return records

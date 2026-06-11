@@ -68,7 +68,14 @@ def load_played_matches(session: Session, cutoff_date: dt.date | None = None) ->
 def seed_elo_ratings(
     session: Session, config: EloConfig | None = None, cutoff_date: dt.date | None = None
 ) -> int:
-    """Recompute Elo and overwrite the ``elo_ratings`` table. Returns the row count."""
+    """Recompute Elo and overwrite the ``elo_ratings`` table. Returns the row count.
+
+    Recommended usage is a FULL-history seed (``cutoff_date=None``): because the replay is
+    sequential and day-atomic, earlier ratings are immutable to later matches, so as-of lookups
+    on a full-history table are already leakage-safe for any date. The ``cutoff_date`` param is
+    only for producing a deliberately truncated table. The delete+insert runs in the caller's
+    transaction (atomic for other readers under PostgreSQL MVCC); the caller must commit.
+    """
     history = compute_elo_history(load_played_matches(session, cutoff_date), config)
     session.execute(delete(EloRating))
     rows = [
@@ -91,7 +98,11 @@ def seed_elo_ratings(
 def get_rating_as_of(
     session: Session, team_id: int, as_of_date: dt.date, base_rating: float = BASE_RATING
 ) -> float:
-    """Return a team's strength as-of a date: rating_post of its latest match strictly before it."""
+    """Return a team's strength as-of a date: rating_post of its latest match strictly before it.
+
+    With day-atomic Elo this exactly equals the ``rating_pre`` stored for any match on
+    ``as_of_date`` (verified by tests), so it is the leakage-safe strength for predicting it.
+    """
     stmt = (
         select(EloRating.rating_post)
         .where(EloRating.team_id == team_id, EloRating.match_date < as_of_date)

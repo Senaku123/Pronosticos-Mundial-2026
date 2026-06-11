@@ -10,7 +10,19 @@ from wc26.models.elo import (
     compute_elo_history,
     expected_score,
     goal_difference_multiplier,
+    predict_expected,
 )
+
+
+def test_predict_expected_applies_home_advantage() -> None:
+    # On a neutral field equal ratings -> 0.5; with home advantage the home team is favoured.
+    assert predict_expected(1500, 1500, neutral=True) == 0.5
+    assert predict_expected(1500, 1500, neutral=False) > 0.5
+    # Home advantage must match the training convention (expected_score with the bonus added).
+    cfg = EloConfig()
+    assert predict_expected(1500, 1500, neutral=False, config=cfg) == expected_score(
+        1500 + cfg.home_advantage, 1500
+    )
 
 
 def test_expected_score_symmetry() -> None:
