@@ -137,6 +137,12 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 7 — Scoreline probability matrix (single source of truth) + calibration
 
+> **Estado: 7a implementada (2026-06-11); calibración pendiente (7b).** Modelo **Dixon-Coles**
+> (matriz de marcadores con corrección τ en celdas bajas; ρ=−0.037 ajustado por MLE sobre 49.403
+> partidos). W/D/L derivado por suma de zonas = **única fuente de verdad** (`test_wdl_single_source`
+> puro y contra BD). Tabla `scoreline_probabilities` + forecast DC del Mundial 2026 almacenado.
+> **Pendiente (7b):** capa de calibración (Platt) validada out-of-time + `calibration_curves`.
+
 - **Objetivo:** modelo de goles → matriz → W/D/L; capa de calibración.
 - **Entregables:** Poisson/Dixon-Coles; `scoreline_probabilities`; derivación W/D/L por suma de
   zonas; calibración (Platt por defecto) validada temporalmente; `calibration_curves`;

@@ -293,3 +293,30 @@ class MatchPrediction(Base):
     __table_args__ = (
         UniqueConstraint("model_run_id", "match_id", name="uq_match_predictions_run_match"),
     )
+
+
+class ScorelineProbability(Base):
+    """One cell of a match's scoreline probability matrix (addendum: scoreline matrix).
+
+    Stored only for 'official' predictions (e.g. the 2026 fixtures), not per Monte Carlo
+    iteration. W/D/L is derived by summing zones of these cells (the single source of truth).
+    """
+
+    __tablename__ = "scoreline_probabilities"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_run_id: Mapped[int] = mapped_column(ForeignKey("model_runs.id", ondelete="CASCADE"))
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"))
+    home_goals: Mapped[int] = mapped_column(Integer)
+    away_goals: Mapped[int] = mapped_column(Integer)
+    probability: Mapped[float] = mapped_column(Float)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "model_run_id",
+            "match_id",
+            "home_goals",
+            "away_goals",
+            name="uq_scoreline_run_match_score",
+        ),
+    )
