@@ -103,6 +103,12 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 5 — Feature engineering
 
+> **Estado: implementada (2026-06-11).** `match_features` construida sobre 49.403 partidos
+> (día-atómica, leakage-safe): Elo home/away/diff, forma reciente (puntos y GF/GC últimos 5), días
+> de descanso, importancia y sede; versionada con `feature_pipeline_version`/`cutoff_date`/
+> `code_git_sha`. NULLs de forma/descanso solo en primeros partidos (141, documentado). Columnas
+> finas de venue (altitud/calor) quedan reservadas para cuando haya datos.
+
 - **Objetivo:** features de partido a partir del feature store.
 - **Entregables:** `match_features` versionado (`feature_pipeline_version`, `cutoff_date`,
   `code_git_sha`); features de fuerza, forma, GF/GC, diferencia, tipo/importancia, sede

@@ -205,3 +205,45 @@ class EloRating(Base):
     is_home: Mapped[bool] = mapped_column(Boolean)
 
     __table_args__ = (UniqueConstraint("team_id", "match_id", name="uq_elo_ratings_team_match"),)
+
+
+class MatchFeature(Base):
+    """Point-in-time features for one match (Phase 5).
+
+    Every column is computed using ONLY information strictly before the match (day-atomic),
+    so a row is leakage-safe for predicting its match. Versioned for reproducibility (addendum §8):
+    ``feature_pipeline_version`` + ``cutoff_date`` + ``code_git_sha``.
+    """
+
+    __tablename__ = "match_features"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"))
+    feature_pipeline_version: Mapped[str] = mapped_column(String(20))
+    cutoff_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    code_git_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    # Strength (from internal Elo, rating_pre).
+    elo_home: Mapped[float] = mapped_column(Float)
+    elo_away: Mapped[float] = mapped_column(Float)
+    elo_diff: Mapped[float] = mapped_column(Float)
+
+    # Recent form over the last N matches (NULL when the team has no prior matches).
+    home_form_points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    away_form_points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    home_gf_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    home_ga_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    away_gf_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    away_ga_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    home_form_n: Mapped[int] = mapped_column(Integer)
+    away_form_n: Mapped[int] = mapped_column(Integer)
+
+    # Rest (days since each team's previous match; NULL for a team's first match).
+    home_rest_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    away_rest_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Context.
+    importance_weight: Mapped[float] = mapped_column(Float)
+    is_neutral: Mapped[bool] = mapped_column(Boolean)
+
+    __table_args__ = (UniqueConstraint("match_id", name="uq_match_features_match"),)
