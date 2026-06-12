@@ -70,7 +70,8 @@ def skill_score(model_loss: float, baseline_loss: float) -> float:
     return 1.0 - model_loss / baseline_loss
 
 
-def _per_match_log_loss(probs: list[ProbTriplet], outcomes: list[int]) -> list[float]:
+def per_match_log_loss(probs: list[ProbTriplet], outcomes: list[int]) -> list[float]:
+    """Per-match log losses, the paired-test input (public: the live flow pairs on these too)."""
     return [log_loss([p], [o]) for p, o in zip(probs, outcomes, strict=True)]
 
 
@@ -130,3 +131,30 @@ def evaluate_model(
         ece=average_ece(probs, outcomes),
         accuracy=accuracy(probs, outcomes),
     )
+
+
+def evaluation_metric_rows(
+    backtest_run_id: int, evaluations: dict[str, ModelEvaluation], baseline: str
+) -> list[dict[str, object]]:
+    """Long-format ``backtest_metrics`` rows for evaluations vs a baseline.
+
+    The single source of the metric names: the live scoring (Phase 12) must persist exactly the
+    Phase 8 names or the live-vs-backtest comparison silently drifts.
+    """
+    base = evaluations[baseline]
+    rows: list[dict[str, object]] = []
+    for name, evaluation in evaluations.items():
+        values = {
+            "log_loss": evaluation.log_loss,
+            "brier": evaluation.brier,
+            "rps": evaluation.rps,
+            "ece": evaluation.ece,
+            "accuracy": evaluation.accuracy,
+            "skill_log_loss_vs_elo": skill_score(evaluation.log_loss, base.log_loss),
+            "skill_brier_vs_elo": skill_score(evaluation.brier, base.brier),
+        }
+        rows.extend(
+            {"backtest_run_id": backtest_run_id, "model_name": name, "metric": m, "value": v}
+            for m, v in values.items()
+        )
+    return rows

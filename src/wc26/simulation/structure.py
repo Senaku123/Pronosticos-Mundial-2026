@@ -13,6 +13,17 @@ item (addendum §6). Team names must match ``teams.canonical_name`` in the datab
 
 from __future__ import annotations
 
+import datetime as dt
+
+# Official 2026 calendar facts (FIFA match schedule). TOURNAMENT_START doubles as the strict
+# training cutoff (mirrors WorldCupEdition.start_date in structure32.py). The Round-of-32 window
+# identifies real R32 fixtures in the data (no stage column exists), and the third-place date
+# matters because semifinal LOSERS reappear there - it must never decide a drawn tie's winner.
+TOURNAMENT_START: dt.date = dt.date(2026, 6, 11)
+R32_FIRST_DAY: dt.date = dt.date(2026, 6, 28)
+R32_LAST_DAY: dt.date = dt.date(2026, 7, 3)
+THIRD_PLACE_DATE: dt.date = dt.date(2026, 7, 18)
+
 # Co-hosts: they play their entire group stage in their own country (home advantage applies).
 # Knockout venues are simulated as neutral for everyone (documented V1 simplification).
 HOSTS_2026: frozenset[str] = frozenset({"Mexico", "United States", "Canada"})

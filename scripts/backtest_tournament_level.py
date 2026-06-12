@@ -18,14 +18,14 @@ from __future__ import annotations
 import json
 import math
 import platform
-import subprocess
 import sys
+from dataclasses import dataclass
 
-from sqlalchemy import delete, insert, select
-from sqlalchemy.orm import Session, aliased
-from tqdm import tqdm
+from sqlalchemy import delete, insert
+from sqlalchemy.orm import Session
 
 from wc26.backtesting.tournament_level import (
+    ChampionAssessment,
     PlayedMatch,
     assess_champion,
     block_bootstrap_mean,
@@ -35,17 +35,12 @@ from wc26.backtesting.tournament_level import (
     validate_groups_against_matches,
 )
 from wc26.database.base import get_session_factory
-from wc26.database.models import (
-    BacktestMetric,
-    BacktestRun,
-    Match,
-    Team,
-    Tournament,
-    TournamentMapping,
-)
+from wc26.database.models import BacktestMetric, BacktestRun
+from wc26.evaluation.live_scoring import world_cup_matches
 from wc26.models.engine_config import fit_engine, load_team_elos
 from wc26.simulation.structure32 import WC_EDITIONS, WorldCupEdition
 from wc26.simulation.tournament32 import run_monte_carlo32
+from wc26.utils.provenance import git_sha as _git_sha
 
 SEED = 20260611
 RUN_ID = "tournament_level_v1"
@@ -53,39 +48,24 @@ ENGINE = "dixon_coles_calibrated"
 REFERENCE = "format_uniform"
 
 
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
+@dataclass(frozen=True)
+class EditionResult:
+    """One edition's backtest outcome (engine vs format-uniform reference)."""
+
+    year: int
+    n_matches: int
+    rps_engine: float
+    rps_uniform: float
+    champion: ChampionAssessment
+
+    @property
+    def champion_log_loss(self) -> float:
+        return -math.log(max(self.champion.probability, 1e-12))
 
 
 def _load_edition_matches(session: Session, edition: WorldCupEdition) -> list[PlayedMatch]:
-    home = aliased(Team)
-    away = aliased(Team)
     rows = session.execute(
-        select(
-            Match.match_date,
-            home.canonical_name.label("home"),
-            away.canonical_name.label("away"),
-            Match.home_score,
-            Match.away_score,
-        )
-        .join(Tournament, Tournament.id == Match.tournament_id)
-        .join(TournamentMapping, TournamentMapping.raw_tournament == Tournament.name)
-        .join(home, home.id == Match.home_team_id)
-        .join(away, away.id == Match.away_team_id)
-        .where(
-            TournamentMapping.tournament_category == "world_cup",
-            Match.match_date >= edition.start_date,
-            Match.match_date <= edition.end_date,
-            Match.home_score.is_not(None),
-            Match.away_score.is_not(None),
-        )
-        .order_by(Match.match_date, Match.id)
+        world_cup_matches(start=edition.start_date, end=edition.end_date, played=True)
     ).all()
     return [
         PlayedMatch(r.match_date, r.home, r.away, int(r.home_score), int(r.away_score))
@@ -97,7 +77,7 @@ def main(argv: list[str]) -> int:
     n_sims = int(argv[0]) if argv else 50000
     uniform = format_uniform_cumulative()
 
-    per_edition: list[dict[str, float]] = []
+    per_edition: list[EditionResult] = []
     session_factory = get_session_factory()
     with session_factory() as session:
         for edition in WC_EDITIONS:
@@ -110,37 +90,32 @@ def main(argv: list[str]) -> int:
             teams = [t for group in edition.groups.values() for t in group]
             elos = load_team_elos(session, teams, edition.start_date)
 
-            with tqdm(total=1, desc=f"Monte Carlo {edition.year}", unit="run") as bar:
-                probabilities = run_monte_carlo32(
-                    edition, elos, config, n_sims, SEED + edition.year, calibrator
-                )
-                bar.update(1)
+            probabilities = run_monte_carlo32(
+                edition, elos, config, n_sims, SEED + edition.year, calibrator, progress=True
+            )
 
             champion = assess_champion(probabilities, edition.champion)
             uniform_probs = {team: uniform for team in probabilities}
-            stats = {
-                "year": float(edition.year),
-                "rho": config.rho,
-                "n_matches": float(len(matches)),
-                "rps_engine": mean_stage_rps(probabilities, actual),
-                "rps_uniform": mean_stage_rps(uniform_probs, actual),
-                "champion_prob": champion.probability,
-                "champion_rank": float(champion.rank),
-                "champion_log_loss": -math.log(max(champion.probability, 1e-12)),
-            }
-            per_edition.append(stats)
+            result = EditionResult(
+                year=edition.year,
+                n_matches=len(matches),
+                rps_engine=mean_stage_rps(probabilities, actual),
+                rps_uniform=mean_stage_rps(uniform_probs, actual),
+                champion=champion,
+            )
+            per_edition.append(result)
             print(
-                f"  rps engine={stats['rps_engine']:.4f}  uniform={stats['rps_uniform']:.4f}  "
+                f"  rps engine={result.rps_engine:.4f}  uniform={result.rps_uniform:.4f}  "
                 f"champion {edition.champion}: p={champion.probability:.3f} "
                 f"rank={champion.rank}/{champion.n_teams}"
             )
 
-        engine_boot = block_bootstrap_mean([s["rps_engine"] for s in per_edition])
-        uniform_boot = block_bootstrap_mean([s["rps_uniform"] for s in per_edition])
+        engine_boot = block_bootstrap_mean([r.rps_engine for r in per_edition])
+        uniform_boot = block_bootstrap_mean([r.rps_uniform for r in per_edition])
         skill = 1.0 - engine_boot.mean / uniform_boot.mean if uniform_boot.mean else 0.0
-        champion_ll_mean = sum(s["champion_log_loss"] for s in per_edition) / len(per_edition)
+        champion_ll_mean = sum(r.champion_log_loss for r in per_edition) / len(per_edition)
         uniform_ll = math.log(32.0)
-        sane = all(s["champion_rank"] <= 5 for s in per_edition)
+        sane = all(r.champion.rank <= 5 for r in per_edition)
 
         # Persist run + metrics (long format), replacing any previous Phase 11 run.
         session.execute(delete(BacktestRun).where(BacktestRun.run_id == RUN_ID))
@@ -149,7 +124,7 @@ def main(argv: list[str]) -> int:
             run_id=RUN_ID,
             backtest_level="tournament",
             test_from=WC_EDITIONS[0].start_date,
-            n_matches=int(sum(s["n_matches"] for s in per_edition)),
+            n_matches=sum(r.n_matches for r in per_edition),
             git_sha=_git_sha(),
             python_version=platform.python_version(),
             config_json=json.dumps(
@@ -158,7 +133,7 @@ def main(argv: list[str]) -> int:
                     "reference": REFERENCE,
                     "n_simulations": n_sims,
                     "seed": SEED,
-                    "editions": [int(s["year"]) for s in per_edition],
+                    "editions": [r.year for r in per_edition],
                     "sane": sane,
                 }
             ),
@@ -166,12 +141,11 @@ def main(argv: list[str]) -> int:
         session.add(run)
         session.flush()
         metric_rows = []
-        for stats in per_edition:
-            year = int(stats["year"])
+        for r in per_edition:
             for metric, value in (
-                (f"rps_{year}", stats["rps_engine"]),
-                (f"champion_prob_{year}", stats["champion_prob"]),
-                (f"champion_rank_{year}", stats["champion_rank"]),
+                (f"rps_{r.year}", r.rps_engine),
+                (f"champion_prob_{r.year}", r.champion.probability),
+                (f"champion_rank_{r.year}", float(r.champion.rank)),
             ):
                 metric_rows.append(
                     {
@@ -185,8 +159,8 @@ def main(argv: list[str]) -> int:
                 {
                     "backtest_run_id": run.id,
                     "model_name": REFERENCE,
-                    "metric": f"rps_{year}",
-                    "value": stats["rps_uniform"],
+                    "metric": f"rps_{r.year}",
+                    "value": r.rps_uniform,
                 }
             )
         for model, boot, ll in (
@@ -216,10 +190,10 @@ def main(argv: list[str]) -> int:
     print(f"\nTournament-level sanity check ({len(per_edition)} editions, N={n_sims} sims each):\n")
     print(f"{'edition':<9}{'rps engine':>11}{'rps unif.':>11}{'P(champ)':>10}{'rank':>6}")
     print("-" * 47)
-    for stats in per_edition:
+    for r in per_edition:
         print(
-            f"{int(stats['year']):<9}{stats['rps_engine']:>11.4f}{stats['rps_uniform']:>11.4f}"
-            f"{stats['champion_prob']:>10.3f}{int(stats['champion_rank']):>6}"
+            f"{r.year:<9}{r.rps_engine:>11.4f}{r.rps_uniform:>11.4f}"
+            f"{r.champion.probability:>10.3f}{r.champion.rank:>6}"
         )
     print(
         f"\n  mean RPS engine  = {engine_boot.mean:.4f}  "

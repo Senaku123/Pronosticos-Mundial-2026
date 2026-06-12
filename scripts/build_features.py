@@ -12,21 +12,11 @@ Records the current git SHA for reproducibility (addendum §8). Requires elo_rat
 from __future__ import annotations
 
 import datetime as dt
-import subprocess
 import sys
 
 from wc26.database.base import get_session_factory
 from wc26.features.match_features import seed_match_features
-
-
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
+from wc26.utils.provenance import git_sha as _git_sha
 
 
 def main(argv: list[str]) -> int:

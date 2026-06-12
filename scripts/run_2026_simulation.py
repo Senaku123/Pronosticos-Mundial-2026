@@ -22,44 +22,50 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import json
 import platform
-import subprocess
 
 from sqlalchemy import delete, insert, select
-from tqdm import tqdm
+from sqlalchemy.orm import Session
 
 from wc26.database.base import get_session_factory
 from wc26.database.models import SimulationResult, Team, TournamentSimulation
 from wc26.evaluation.live_scoring import (
     BASELINE_MODEL,
     ENGINE_MODEL,
-    TOURNAMENT_START,
     load_known_results,
     monte_carlo_half_width,
     publish_match_forecasts,
     score_published_forecasts,
     summarize_known,
 )
-from wc26.models.engine_config import fit_engine, load_team_elos
-from wc26.simulation.structure import GROUPS_2026, STAGES
+from wc26.models.calibration import PlattCalibrator
+from wc26.models.dixon_coles import DixonColesConfig
+from wc26.models.engine_config import (
+    engine_config_json,
+    engine_from_config_json,
+    fit_engine,
+    load_team_elos,
+)
+from wc26.simulation.structure import GROUPS_2026, STAGES, TOURNAMENT_START
 from wc26.simulation.tournament import run_monte_carlo
+from wc26.utils.provenance import git_sha as _git_sha
 
 
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
+def _load_engine(session: Session) -> tuple[DixonColesConfig, PlattCalibrator]:
+    """The frozen engine configuration: read it from the official run, refit only if absent."""
+    persisted = session.execute(
+        select(TournamentSimulation.config_json).where(TournamentSimulation.run_id == "wc2026")
+    ).scalar_one_or_none()
+    if persisted is None:
+        print("[warn] official 'wc2026' run not found; fitting the engine from scratch")
+        return fit_engine(session, TOURNAMENT_START)
+    return engine_from_config_json(persisted)
 
 
 def _simulate(as_of: dt.date, n_sims: int) -> int:
     session_factory = get_session_factory()
     with session_factory() as session:
-        config, calibrator = fit_engine(session, TOURNAMENT_START)
+        config, calibrator = _load_engine(session)
         known, warnings = load_known_results(session, as_of)
         for warning in warnings:
             print(f"[warn] {warning}")
@@ -70,9 +76,9 @@ def _simulate(as_of: dt.date, n_sims: int) -> int:
 
         seed = int(as_of.strftime("%Y%m%d"))
         print(f"[ok] running {n_sims} simulations as of {as_of} (rho={config.rho:.4f}) ...")
-        with tqdm(total=1, desc="Monte Carlo", unit="run") as bar:
-            probabilities = run_monte_carlo(elos, config, n_sims, seed, calibrator, known)
-            bar.update(1)
+        probabilities = run_monte_carlo(
+            elos, config, n_sims, seed, calibrator, known, progress=True
+        )
 
         run_id = f"wc2026_live_{as_of.isoformat()}"
         session.execute(delete(TournamentSimulation).where(TournamentSimulation.run_id == run_id))
@@ -84,15 +90,11 @@ def _simulate(as_of: dt.date, n_sims: int) -> int:
             cutoff_date=as_of,
             git_sha=_git_sha(),
             python_version=platform.python_version(),
-            config_json=json.dumps(
-                {
-                    "model": ENGINE_MODEL,
-                    "rho": round(config.rho, 4),
-                    "calibration": "platt_pre_tournament",
-                    "platt": {k: round(v, 4) for k, v in calibrator.to_dict().items()},
-                    "hosts_home_advantage": "group_stage",
-                    "known": summarize_known(known, warnings),
-                }
+            config_json=engine_config_json(
+                config,
+                calibrator,
+                hosts_home_advantage="group_stage",
+                known=summarize_known(known, warnings),
             ),
         )
         session.add(simulation)
@@ -134,8 +136,8 @@ def _simulate(as_of: dt.date, n_sims: int) -> int:
 def _publish(as_of: dt.date) -> int:
     session_factory = get_session_factory()
     with session_factory() as session:
-        config, calibrator = fit_engine(session, TOURNAMENT_START)
-        published = publish_match_forecasts(
+        config, calibrator = _load_engine(session)
+        published, warnings = publish_match_forecasts(
             session,
             as_of,
             config,
@@ -145,6 +147,8 @@ def _publish(as_of: dt.date) -> int:
         )
         session.commit()
 
+    for warning in warnings:
+        print(f"[warn] {warning}")
     print(f"\nPublished {len(published)} frozen forecasts as of {as_of} (engine + baseline):\n")
     print(f"{'date':<12}{'home':<22}{'away':<22}{'Hwin':>6}{'Draw':>6}{'Awin':>6}  score")
     print("-" * 82)

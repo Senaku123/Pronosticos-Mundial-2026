@@ -9,7 +9,9 @@ before ``fit_before`` (addendum §1).
 from __future__ import annotations
 
 import datetime as dt
+import json
 from collections.abc import Iterable
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,7 +20,7 @@ from tqdm import tqdm
 from wc26.database.models import Match, MatchFeature, Team
 from wc26.features.cutoff import get_rating_as_of
 from wc26.models.baselines import BaselineConfig, elo_to_lambdas
-from wc26.models.calibration import PlattCalibrator
+from wc26.models.calibration import PlattCalibrator, outcome_index
 from wc26.models.dixon_coles import DixonColesConfig, fit_rho, predict_dixon_coles
 
 
@@ -53,12 +55,31 @@ def fit_engine(
     for elo_home, elo_away, neutral, home_score, away_score in iterator:
         pred, _ = predict_dixon_coles(elo_home, elo_away, neutral, config)
         probs.append((pred.p_home_win, pred.p_draw, pred.p_away_win))
-        outcomes.append(
-            0
-            if int(home_score) > int(away_score)
-            else (1 if int(home_score) == int(away_score) else 2)
-        )
+        outcomes.append(outcome_index(int(home_score), int(away_score)))
     return config, PlattCalibrator.fit(probs, outcomes)
+
+
+def engine_config_json(config: DixonColesConfig, calibrator: PlattCalibrator, **extra: Any) -> str:
+    """Serialize the official engine configuration exactly one way (addendum §8).
+
+    Full precision on purpose: ``PlattCalibrator.from_dict`` must rebuild the identical frozen
+    configuration from a persisted run instead of refitting (six floats stay well under the
+    config_json column limit).
+    """
+    payload: dict[str, Any] = {
+        "model": "dixon_coles_calibrated",
+        "rho": config.rho,
+        "calibration": "platt_pre_tournament",
+        "platt": calibrator.to_dict(),
+    }
+    payload.update(extra)
+    return json.dumps(payload)
+
+
+def engine_from_config_json(config_json: str) -> tuple[DixonColesConfig, PlattCalibrator]:
+    """Rebuild the frozen engine configuration persisted by ``engine_config_json``."""
+    payload = json.loads(config_json)
+    return DixonColesConfig(rho=float(payload["rho"])), PlattCalibrator.from_dict(payload["platt"])
 
 
 def load_team_elos(session: Session, teams: Iterable[str], as_of: dt.date) -> dict[str, float]:

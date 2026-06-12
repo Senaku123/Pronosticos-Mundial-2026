@@ -11,32 +11,19 @@ stage probabilities. Prints the title odds. Requires elo_ratings + match_feature
 
 from __future__ import annotations
 
-import json
 import platform
-import subprocess
 import sys
 
 from sqlalchemy import delete, insert, select
-from tqdm import tqdm
 
 from wc26.database.base import get_session_factory
 from wc26.database.models import SimulationResult, Team, TournamentSimulation
-from wc26.evaluation.live_scoring import TOURNAMENT_START
-from wc26.models.engine_config import fit_engine, load_team_elos
-from wc26.simulation.structure import GROUPS_2026, STAGES
+from wc26.models.engine_config import engine_config_json, fit_engine, load_team_elos
+from wc26.simulation.structure import GROUPS_2026, STAGES, TOURNAMENT_START
 from wc26.simulation.tournament import run_monte_carlo
+from wc26.utils.provenance import git_sha as _git_sha
 
 SEED = 20260611
-
-
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
 
 
 def main(argv: list[str]) -> int:
@@ -56,9 +43,7 @@ def main(argv: list[str]) -> int:
         print(
             f"[ok] running {n_sims} simulations (rho={cfg.rho:.4f}, calibrated, hosts at home) ..."
         )
-        with tqdm(total=1, desc="Monte Carlo", unit="run") as bar:
-            probabilities = run_monte_carlo(team_elos, cfg, n_sims, SEED, calibrator)
-            bar.update(1)
+        probabilities = run_monte_carlo(team_elos, cfg, n_sims, SEED, calibrator, progress=True)
 
         # Persist run + aggregated results.
         session.execute(delete(TournamentSimulation).where(TournamentSimulation.run_id == "wc2026"))
@@ -70,15 +55,7 @@ def main(argv: list[str]) -> int:
             cutoff_date=TOURNAMENT_START,
             git_sha=_git_sha(),
             python_version=platform.python_version(),
-            config_json=json.dumps(
-                {
-                    "rho": round(cfg.rho, 4),
-                    "model": "dixon_coles_calibrated",
-                    "calibration": "platt_pre_tournament",
-                    "platt": {k: round(v, 4) for k, v in calibrator.to_dict().items()},
-                    "hosts_home_advantage": "group_stage",
-                }
-            ),
+            config_json=engine_config_json(cfg, calibrator, hosts_home_advantage="group_stage"),
         )
         session.add(sim)
         session.flush()

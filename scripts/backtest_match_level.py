@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import datetime as dt
 import platform
-import subprocess
 import sys
 
 from sqlalchemy import delete, insert, select
@@ -25,33 +24,22 @@ from tqdm import tqdm
 
 from wc26.backtesting.match_level import (
     PairedTest,
-    _per_match_log_loss,
     evaluate_model,
+    evaluation_metric_rows,
     paired_bootstrap,
+    per_match_log_loss,
     skill_score,
 )
 from wc26.database.base import get_session_factory
 from wc26.database.models import BacktestMetric, BacktestRun, Match, MatchPrediction, ModelRun
+from wc26.models.calibration import outcome_index
+from wc26.utils.provenance import git_sha as _git_sha
 
 TEST_FROM = dt.date(2018, 1, 1)
 MODELS = ["naive_favorite", "elo_only", "simple_poisson", "dixon_coles", "dixon_coles_calibrated"]
 BASELINE = "elo_only"
 CHAMPION = "dixon_coles_calibrated"
 ECE_ACCEPTABLE = 0.05
-
-
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
-
-
-def _outcome(home_score: int, away_score: int) -> int:
-    return 0 if home_score > away_score else (1 if home_score == away_score else 2)
 
 
 def _load(session, run_id: str):
@@ -70,7 +58,7 @@ def _load(session, run_id: str):
         .order_by(MatchPrediction.match_id)
     ).all()
     probs = [(r.p_home_win, r.p_draw, r.p_away_win) for r in rows]
-    outcomes = [_outcome(r.home_score, r.away_score) for r in rows]
+    outcomes = [outcome_index(r.home_score, r.away_score) for r in rows]
     match_ids = [r.match_id for r in rows]
     return probs, outcomes, match_ids
 
@@ -90,7 +78,7 @@ def main(argv: list[str]) -> int:
         base = evals[BASELINE]
         champ = evals[CHAMPION]
         paired: PairedTest = paired_bootstrap(
-            _per_match_log_loss(*data[CHAMPION]), _per_match_log_loss(*data[BASELINE])
+            per_match_log_loss(*data[CHAMPION]), per_match_log_loss(*data[BASELINE])
         )
 
         beats_log_loss = champ.log_loss < base.log_loss
@@ -114,27 +102,7 @@ def main(argv: list[str]) -> int:
         )
         session.add(run)
         session.flush()
-        metric_rows = []
-        for name, e in evals.items():
-            values = {
-                "log_loss": e.log_loss,
-                "brier": e.brier,
-                "rps": e.rps,
-                "ece": e.ece,
-                "accuracy": e.accuracy,
-                "skill_log_loss_vs_elo": skill_score(e.log_loss, base.log_loss),
-                "skill_brier_vs_elo": skill_score(e.brier, base.brier),
-            }
-            for metric, value in values.items():
-                metric_rows.append(
-                    {
-                        "backtest_run_id": run.id,
-                        "model_name": name,
-                        "metric": metric,
-                        "value": value,
-                    }
-                )
-        session.execute(insert(BacktestMetric), metric_rows)
+        session.execute(insert(BacktestMetric), evaluation_metric_rows(run.id, evals, BASELINE))
         session.commit()
 
     print(f"\nMatch-level backtest (out-of-time, test >= {TEST_FROM}, n={base.n}):\n")

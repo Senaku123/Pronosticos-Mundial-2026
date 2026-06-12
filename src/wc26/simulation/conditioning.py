@@ -14,12 +14,16 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class KnownResults:
-    """Real results to hold fixed: group scorelines and knockout advancers."""
+    """Real results to hold fixed: group scorelines, knockout advancers, real R32 pairings."""
 
     # Group stage: pair -> {team_name: goals}. Each group pairing plays exactly once.
     group_scores: Mapping[frozenset[str], Mapping[str, int]] = field(default_factory=dict)
     # Knockout: pair -> the team that advanced (however the tie was decided).
     knockout_winners: Mapping[frozenset[str], str] = field(default_factory=dict)
+    # The real Round-of-32 pairings once FIFA's bracket is locked. Our third-place slotting is
+    # NOT the official Annex C table (documented pending item), so conditioned re-simulations
+    # must take the real pairings as given or real R32 results could silently never match.
+    r32_pairings: frozenset[frozenset[str]] = frozenset()
 
     def __bool__(self) -> bool:
-        return bool(self.group_scores) or bool(self.knockout_winners)
+        return bool(self.group_scores) or bool(self.knockout_winners) or bool(self.r32_pairings)

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import datetime as dt
 import platform
-import subprocess
 import sys
 
 from sqlalchemy import delete, insert, select
@@ -31,27 +30,15 @@ from wc26.models.calibration import (
     brier_score,
     expected_calibration_error,
     log_loss,
+    outcome_index,
     reliability_bins,
 )
 from wc26.models.dixon_coles import DixonColesConfig, fit_rho, predict_dixon_coles
 from wc26.models.predict import reset_model_run, store_predictions
+from wc26.utils.provenance import git_sha as _git_sha
 
 SPLIT_DATE = dt.date(2018, 1, 1)
 CLASSES = (("home", 0), ("draw", 1), ("away", 2))
-
-
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
-
-
-def _outcome(home_score: int, away_score: int) -> int:
-    return 0 if home_score > away_score else (1 if home_score == away_score else 2)
 
 
 def _avg_ece(probs: list[tuple[float, float, float]], outcomes: list[int]) -> float:
@@ -113,7 +100,7 @@ def main(argv: list[str]) -> int:
                 (
                     r.match_id,
                     (pred.p_home_win, pred.p_draw, pred.p_away_win),
-                    _outcome(int(r.home_score), int(r.away_score)),
+                    outcome_index(int(r.home_score), int(r.away_score)),
                     r.match_date,
                 )
             )

@@ -262,6 +262,22 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 > fijados (snapshot upstream aún sin los partidos del 11-jun, hash idéntico verificado) → Spain
 > 20,6% ±0,4. Configuración del motor (ρ + Platt) = fit pre-torneo que ganó el GO, persistida en
 > `config_json`. Operación diaria: download → ingest → compute_elo → score → publish → simulate.
+>
+> **Auditoría adversarial post-implementación (2026-06-12): 15 hallazgos confirmados, todos
+> corregidos.** Los serios: (1) un empate de semifinal (definido por penales) con el partido por
+> el 3.er puesto ya jugado hacía que la inferencia "aparece en un partido posterior" fijara al
+> **PERDEDOR** como finalista — el 3.er puesto ahora se excluye de la inferencia y nunca es hecho
+> condicionante (tests de regresión en las tres ventanas temporales); (2) como la asignación de
+> terceros no es el Annex C oficial, los resultados reales del R32 podían **no coincidir nunca**
+> con el pareo simulado y descartarse en silencio — ahora los cruces reales del R32 (jugados o
+> programados) **fijan** los slots de terceros (`thirds_from_real_pairings` + `assign_thirds` con
+> slots pineados) y todo resultado conocido no consumido por la simulación **lanza error** en vez
+> de ignorarse. Menores: configuración del motor serializada una sola vez (`engine_config_json`,
+> precisión completa) y **releída** del run oficial en vez de re-ajustarse en cada comando
+> (~14 s → instantáneo); helpers únicos (`outcome_index`, `per_match_log_loss`,
+> `evaluation_metric_rows`, `wc26.utils.provenance.git_sha`, `world_cup_matches` parametrizada
+> compartida con Phase 11); `publish` reporta `[warn]` los fixtures pasados sin resultado;
+> `score` sin partidos ya no persiste métricas en cero; barras de progreso reales. 90 tests.
 
 - **Objetivo:** simular 2026 y operar durante el torneo.
 - **Entregables:** simulación 2026 (probabilidades por fase y campeón con bandas); flujo de **live

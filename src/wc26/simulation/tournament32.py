@@ -12,6 +12,7 @@ validate propagation, never to select models (addendum §3).
 from __future__ import annotations
 
 import numpy as np
+from tqdm import tqdm
 
 from wc26.models.calibration import PlattCalibrator
 from wc26.models.dixon_coles import DixonColesConfig
@@ -79,6 +80,7 @@ def run_monte_carlo32(
     n_simulations: int,
     seed: int,
     calibrator: PlattCalibrator | None = None,
+    progress: bool = False,
 ) -> dict[str, dict[str, float]]:
     """Run ``n_simulations`` of one edition; return cumulative stage probabilities per team."""
     expected = {team for group in edition.groups.values() for team in group}
@@ -88,7 +90,10 @@ def run_monte_carlo32(
 
     rng = np.random.default_rng(seed)
     counts = {team: dict.fromkeys(STAGES_32, 0) for team in expected}
-    for _ in range(n_simulations):
+    iterations = tqdm(
+        range(n_simulations), desc=f"Monte Carlo {edition.year}", unit="sim", disable=not progress
+    )
+    for _ in iterations:
         reached = simulate_tournament32(edition, team_elos, config, rng, calibrator)
         for team, stage in reached.items():
             for s in STAGES_32[: STAGES_32.index(stage) + 1]:

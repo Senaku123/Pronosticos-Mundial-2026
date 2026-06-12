@@ -8,15 +8,22 @@ import numpy as np
 import pytest
 
 from wc26.evaluation.live_scoring import (
+    PlayedResult,
     PublishedPrediction,
+    classify_results,
     monte_carlo_half_width,
     operative_forecasts,
 )
 from wc26.models.dixon_coles import DixonColesConfig
 from wc26.simulation.conditioning import KnownResults
 from wc26.simulation.groups import simulate_group
-from wc26.simulation.structure import GROUPS_2026
-from wc26.simulation.tournament import run_monte_carlo, simulate_tournament
+from wc26.simulation.structure import GROUPS_2026, THIRD_PLACE_DATE
+from wc26.simulation.tournament import (
+    assign_thirds,
+    run_monte_carlo,
+    simulate_tournament,
+    thirds_from_real_pairings,
+)
 
 
 def _all_team_elos() -> dict[str, float]:
@@ -118,3 +125,91 @@ def test_monte_carlo_half_width() -> None:
     assert monte_carlo_half_width(0.5, 10000) == pytest.approx(0.0098, abs=1e-4)
     assert monte_carlo_half_width(0.0, 10000) == 0.0
     assert monte_carlo_half_width(0.5, 0) == 0.0
+
+
+# --- drawn-knockout inference: the third-place match must never decide a winner ---
+
+_SF_DAY = dt.date(2026, 7, 14)
+_FINAL_DAY = dt.date(2026, 7, 19)
+
+
+def _drawn_semifinal_rows(*, bronze: bool, final: bool) -> list[PlayedResult]:
+    rows = [
+        PlayedResult(_SF_DAY, "TeamW", "TeamL", 1, 1),  # decided on penalties: TeamW advanced
+        PlayedResult(dt.date(2026, 7, 15), "OtherW", "OtherL", 2, 0),
+    ]
+    if bronze:
+        rows.append(PlayedResult(THIRD_PLACE_DATE, "TeamL", "OtherL", 1, 0))
+    if final:
+        rows.append(PlayedResult(_FINAL_DAY, "TeamW", "OtherW", 0, 1))
+    return rows
+
+
+def test_drawn_semifinal_before_bronze_is_left_simulated() -> None:
+    known, warnings = classify_results(_drawn_semifinal_rows(bronze=False, final=False))
+    assert frozenset(("TeamW", "TeamL")) not in known.knockout_winners
+    assert len(warnings) == 1 and "left simulated" in warnings[0]
+
+
+def test_drawn_semifinal_with_bronze_played_resolves_to_the_actual_winner() -> None:
+    # The regression the audit caught: the loser reappears in the bronze final, and the old
+    # any-later-appearance rule fixed the LOSER as the advancer. Now the bronze identifies the
+    # eliminated side instead, so the real winner is derived.
+    known, warnings = classify_results(_drawn_semifinal_rows(bronze=True, final=False))
+    assert known.knockout_winners[frozenset(("TeamW", "TeamL"))] == "TeamW"
+    assert warnings == []
+
+
+def test_drawn_semifinal_after_final_resolves_via_the_final() -> None:
+    known, _ = classify_results(_drawn_semifinal_rows(bronze=True, final=True))
+    assert known.knockout_winners[frozenset(("TeamW", "TeamL"))] == "TeamW"
+
+
+def test_third_place_match_is_never_a_conditioning_fact() -> None:
+    known, _ = classify_results(_drawn_semifinal_rows(bronze=True, final=True))
+    assert frozenset(("TeamL", "OtherL")) not in known.knockout_winners
+
+
+def test_drawn_final_is_left_simulated() -> None:
+    rows = _drawn_semifinal_rows(bronze=True, final=False)
+    rows.append(PlayedResult(_FINAL_DAY, "TeamW", "OtherW", 3, 3))  # 2022-style shootout final
+    known, warnings = classify_results(rows)
+    assert frozenset(("TeamW", "OtherW")) not in known.knockout_winners
+    assert any("left simulated" in w for w in warnings)
+
+
+# --- real R32 pairings lock the third-place slotting; unconsumed results must raise ---
+
+
+def test_thirds_from_real_pairings_pins_slots_and_rejects_inconsistency() -> None:
+    winners = {letter: f"W{letter}" for letter in GROUPS_2026}
+    third_by_group = {letter: f"T{letter}" for letter in "ABCDEFGH"}
+    # Match 74 is anchored by the group E winner; group C is in its allowed set ABCDF.
+    fixed = thirds_from_real_pairings(frozenset({frozenset(("WE", "TC"))}), winners, third_by_group)
+    assert fixed == {74: "C"}
+    assignment = assign_thirds(set(third_by_group), fixed)
+    assert assignment[74] == "C"
+    assert sorted(assignment.values()) == sorted(third_by_group)
+
+    with pytest.raises(ValueError, match="inconsistent"):
+        # Group G is not allowed in match 74 (slot set ABCDF).
+        thirds_from_real_pairings(frozenset({frozenset(("WE", "TG"))}), winners, third_by_group)
+
+
+def test_run_monte_carlo_raises_on_unconsumed_knockout_result() -> None:
+    # Fix group A completely so its last team is eliminated in groups; a real knockout result
+    # involving it can then never match a simulated pairing and must raise, never be ignored.
+    elos = _all_team_elos()
+    teams = GROUPS_2026["A"]
+    group_scores = {
+        frozenset((first, second)): {first: 1, second: 0}
+        for i, first in enumerate(teams)
+        for second in teams[i + 1 :]
+    }
+    eliminated = teams[3]
+    known = KnownResults(
+        group_scores=group_scores,
+        knockout_winners={frozenset((eliminated, GROUPS_2026["B"][0])): eliminated},
+    )
+    with pytest.raises(ValueError, match="never matched a simulated pairing"):
+        run_monte_carlo(elos, DixonColesConfig(), n_simulations=20, seed=5, known=known)

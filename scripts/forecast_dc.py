@@ -11,7 +11,6 @@ scoreline matrix. Requires match_features + elo_ratings seeded.
 from __future__ import annotations
 
 import platform
-import subprocess
 import sys
 
 from sqlalchemy import delete, insert, select
@@ -24,16 +23,7 @@ from wc26.features.cutoff import get_rating_as_of
 from wc26.models.baselines import BaselineConfig, elo_to_lambdas
 from wc26.models.dixon_coles import DixonColesConfig, fit_rho, predict_dixon_coles
 from wc26.models.predict import reset_model_run, store_predictions
-
-
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
+from wc26.utils.provenance import git_sha as _git_sha
 
 
 def main(argv: list[str]) -> int:

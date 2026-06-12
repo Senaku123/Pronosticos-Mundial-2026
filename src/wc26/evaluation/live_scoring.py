@@ -17,16 +17,16 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import Select, delete, insert, select
+from sqlalchemy import Select, delete, insert, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from wc26.backtesting.match_level import (
     ModelEvaluation,
     PairedTest,
-    _per_match_log_loss,
     evaluate_model,
+    evaluation_metric_rows,
     paired_bootstrap,
-    skill_score,
+    per_match_log_loss,
 )
 from wc26.database.models import (
     BacktestMetric,
@@ -40,13 +40,23 @@ from wc26.database.models import (
 )
 from wc26.features.cutoff import get_rating_as_of
 from wc26.models.baselines import elo_only, most_likely_score, wdl_from_matrix
-from wc26.models.calibration import PlattCalibrator, ProbTriplet, calibrate_matrix
+from wc26.models.calibration import (
+    PlattCalibrator,
+    ProbTriplet,
+    calibrate_matrix,
+    outcome_index,
+)
 from wc26.models.dixon_coles import DixonColesConfig, predict_dixon_coles
+from wc26.models.engine_config import engine_config_json
 from wc26.models.predict import reset_model_run, store_predictions
 from wc26.simulation.conditioning import KnownResults
-from wc26.simulation.structure import GROUPS_2026
-
-TOURNAMENT_START = dt.date(2026, 6, 11)
+from wc26.simulation.structure import (
+    GROUPS_2026,
+    R32_FIRST_DAY,
+    R32_LAST_DAY,
+    THIRD_PLACE_DATE,
+    TOURNAMENT_START,
+)
 
 ENGINE_MODEL = "dixon_coles_calibrated"
 BASELINE_MODEL = "elo_only"
@@ -61,8 +71,18 @@ def monte_carlo_half_width(probability: float, n_simulations: int) -> float:
     return 1.96 * math.sqrt(probability * (1.0 - probability) / n_simulations)
 
 
-def _world_cup_matches(as_of: dt.date | None = None, played: bool | None = None) -> Select[Any]:
-    """Base select for 2026 World Cup matches with team names resolved."""
+def world_cup_matches(
+    start: dt.date = TOURNAMENT_START,
+    end: dt.date | None = None,
+    as_of: dt.date | None = None,
+    played: bool | None = None,
+) -> Select[Any]:
+    """Base select for World Cup matches with team names resolved (one query definition).
+
+    ``end`` is inclusive (an edition's final day belongs to it); ``as_of`` is the strict
+    publication cutoff (matches strictly before it). The tournament-level backtest reuses this
+    with each historical edition's window so Phase 11 and Phase 12 agree on the match universe.
+    """
     home = aliased(Team)
     away = aliased(Team)
     stmt = (
@@ -83,60 +103,115 @@ def _world_cup_matches(as_of: dt.date | None = None, played: bool | None = None)
         .join(away, away.id == Match.away_team_id)
         .where(
             TournamentMapping.tournament_category == "world_cup",
-            Match.match_date >= TOURNAMENT_START,
+            Match.match_date >= start,
         )
         .order_by(Match.match_date, Match.id)
     )
+    if end is not None:
+        stmt = stmt.where(Match.match_date <= end)
     if as_of is not None:
         stmt = stmt.where(Match.match_date < as_of)
     if played is True:
         stmt = stmt.where(Match.home_score.is_not(None), Match.away_score.is_not(None))
     if played is False:
-        stmt = stmt.where(Match.home_score.is_(None))
+        stmt = stmt.where(or_(Match.home_score.is_(None), Match.away_score.is_(None)))
     return stmt
 
 
-def load_known_results(session: Session, as_of: dt.date) -> tuple[KnownResults, list[str]]:
-    """Collect real 2026 results strictly before ``as_of`` to condition a re-simulation on.
+@dataclass(frozen=True)
+class PlayedResult:
+    """One real tournament result, decoupled from the DB so classification stays pure."""
 
-    A pair's first meeting inside its own group is a group scoreline; anything else is a
-    knockout tie, whose winner is the higher score or - for a 120' draw recorded by the source -
-    the team that appears in a later match. An undecidable knockout draw (no later appearance
-    yet) is left to be simulated and reported as a warning, never guessed.
+    match_date: dt.date
+    home: str
+    away: str
+    home_score: int
+    away_score: int
+
+
+def _drawn_knockout_winner(
+    row: PlayedResult, index: int, rows: Sequence[PlayedResult]
+) -> str | None:
+    """Winner of a 120'-drawn knockout tie, only when derivable from later appearances.
+
+    The third-place match must NEVER identify a winner: semifinal LOSERS reappear there, so
+    counting it would condition the loser into the final. With it excluded, a later appearance
+    is sound for every round; for a drawn semifinal in the bronze-played/final-pending window,
+    the team NOT in the bronze is the advancer. Anything else stays underivable (None).
+    """
+    later = [r for r in rows[index + 1 :] if r.match_date > row.match_date]
+    non_bronze = {t for r in later if r.match_date != THIRD_PLACE_DATE for t in (r.home, r.away)}
+    advanced = [t for t in (row.home, row.away) if t in non_bronze]
+    if len(advanced) == 1:
+        return advanced[0]
+    if not advanced:
+        bronze = {t for r in later if r.match_date == THIRD_PLACE_DATE for t in (r.home, r.away)}
+        eliminated = [t for t in (row.home, row.away) if t in bronze]
+        if len(eliminated) == 1:
+            return row.away if eliminated[0] == row.home else row.home
+    return None
+
+
+def classify_results(rows: Sequence[PlayedResult]) -> tuple[KnownResults, list[str]]:
+    """Pure classification of real results into conditioning facts (rows in date order).
+
+    A pair's first meeting inside its own group is a group scoreline; the third-place match is
+    skipped entirely (it decides nothing about advancement); anything else is a knockout tie,
+    whose winner is the higher score or - for a 120' draw recorded by the source - derived per
+    ``_drawn_knockout_winner``. An underivable draw is left to be simulated and reported as a
+    warning, never guessed. Played Round-of-32 fixtures also contribute the real pairings that
+    lock the third-place slotting (our algorithmic slotting is not FIFA's Annex C).
     """
     group_of = {team: letter for letter, teams in GROUPS_2026.items() for team in teams}
-    rows = session.execute(_world_cup_matches(as_of=as_of, played=True)).all()
-
     group_scores: dict[frozenset[str], dict[str, int]] = {}
     knockout_winners: dict[frozenset[str], str] = {}
+    r32_pairings: set[frozenset[str]] = set()
     warnings: list[str] = []
     for i, row in enumerate(rows):
         pair = frozenset((row.home, row.away))
-        same_group = group_of.get(row.home) is not None and group_of.get(row.home) == group_of.get(
+        if R32_FIRST_DAY <= row.match_date <= R32_LAST_DAY:
+            r32_pairings.add(pair)
+        if row.match_date == THIRD_PLACE_DATE:
+            continue
+        same_group = group_of.get(row.home) is not None and group_of[row.home] == group_of.get(
             row.away
         )
         if same_group and pair not in group_scores:
-            group_scores[pair] = {row.home: int(row.home_score), row.away: int(row.away_score)}
+            group_scores[pair] = {row.home: row.home_score, row.away: row.away_score}
             continue
         if row.home_score != row.away_score:
             winner = row.home if row.home_score > row.away_score else row.away
         else:
-            later = {
-                t
-                for later_row in rows[i + 1 :]
-                for t in (later_row.home, later_row.away)
-                if later_row.match_date > row.match_date
-            }
-            advanced = [t for t in (row.home, row.away) if t in later]
-            if len(advanced) != 1:
+            derived = _drawn_knockout_winner(row, i, rows)
+            if derived is None:
                 warnings.append(
                     f"knockout draw {row.home} {row.home_score}-{row.away_score} {row.away} "
                     f"({row.match_date}): winner unknown from results alone; left simulated"
                 )
                 continue
-            winner = advanced[0]
+            winner = derived
         knockout_winners[pair] = winner
-    return KnownResults(group_scores, knockout_winners), warnings
+    return KnownResults(group_scores, knockout_winners, frozenset(r32_pairings)), warnings
+
+
+def load_known_results(session: Session, as_of: dt.date) -> tuple[KnownResults, list[str]]:
+    """Real 2026 conditioning facts strictly before ``as_of`` (results) plus locked pairings.
+
+    Scheduled-but-unplayed R32 fixtures already pin the real bracket (the pairing is public the
+    moment groups close, so using it is not leakage), and they matter precisely before those
+    matches are played.
+    """
+    played = [
+        PlayedResult(r.match_date, r.home, r.away, int(r.home_score), int(r.away_score))
+        for r in session.execute(world_cup_matches(as_of=as_of, played=True)).all()
+    ]
+    known, warnings = classify_results(played)
+
+    scheduled = session.execute(world_cup_matches(start=R32_FIRST_DAY, end=R32_LAST_DAY)).all()
+    pairings = set(known.r32_pairings) | {frozenset((r.home, r.away)) for r in scheduled}
+    if pairings != set(known.r32_pairings):
+        known = KnownResults(known.group_scores, known.knockout_winners, frozenset(pairings))
+    return known, warnings
 
 
 @dataclass(frozen=True)
@@ -157,19 +232,24 @@ def publish_match_forecasts(
     calibrator: PlattCalibrator,
     git_sha: str | None = None,
     python_version: str | None = None,
-) -> list[PublishedFixture]:
+) -> tuple[list[PublishedFixture], list[str]]:
     """Freeze engine + baseline W/D/L for every upcoming fixture, as two dated model runs.
 
     Both models use the SAME as-of-``as_of`` Elo (strictly-before lookup), so the published
     engine forecast is always comparable against its baseline. Re-publishing the same day
-    overwrites that day's runs (idempotent); each day gets its own frozen run.
+    overwrites that day's runs (idempotent); each day gets its own frozen run. A fixture
+    already in the past with no ingested result is excluded (publishing the past is cheating)
+    but reported as a warning - it usually means results are lagging ingestion.
     """
-    fixtures = session.execute(_world_cup_matches(played=False)).all()
-    fixtures = [f for f in fixtures if f.match_date >= as_of]
+    all_fixtures = session.execute(world_cup_matches(played=False)).all()
+    fixtures = [f for f in all_fixtures if f.match_date >= as_of]
+    warnings = [
+        f"unplayed past fixture {f.match_date} {f.home} vs {f.away}: no result ingested, "
+        "excluded from publication (results lagging ingestion?)"
+        for f in all_fixtures
+        if f.match_date < as_of
+    ]
 
-    config_json = json.dumps(
-        {"rho": round(config.rho, 4), "platt": calibrator.to_dict(), "fixtures": len(fixtures)}
-    )
     engine_run = reset_model_run(
         session,
         run_id=f"{ENGINE_RUN_PREFIX}{as_of.isoformat()}",
@@ -177,7 +257,7 @@ def publish_match_forecasts(
         git_sha=git_sha,
         python_version=python_version,
         cutoff_date=as_of,
-        config_json=config_json,
+        config_json=engine_config_json(config, calibrator, fixtures=len(fixtures)),
     )
     baseline_run = reset_model_run(
         session,
@@ -233,7 +313,7 @@ def publish_match_forecasts(
         )
     store_predictions(session, engine_rows)
     store_predictions(session, baseline_rows)
-    return published
+    return published, warnings
 
 
 @dataclass(frozen=True)
@@ -298,9 +378,7 @@ def _load_published(session: Session, run_prefix: str) -> list[PublishedPredicti
             match_date=r.match_date,
             publication_date=r.cutoff_date,
             probs=(r.p_home_win, r.p_draw, r.p_away_win),
-            outcome=0
-            if r.home_score > r.away_score
-            else (1 if r.home_score == r.away_score else 2),
+            outcome=outcome_index(r.home_score, r.away_score),
         )
         for r in rows
     ]
@@ -312,7 +390,11 @@ def score_published_forecasts(
     git_sha: str | None = None,
     python_version: str | None = None,
 ) -> LiveScoreReport:
-    """Score every published forecast whose match has a result; persist a 'live' backtest run."""
+    """Score every published forecast whose match has a result; persist a 'live' backtest run.
+
+    With nothing to score yet, nothing is persisted: an empty evaluation would store log_loss
+    0.0 rows that read as perfect scores.
+    """
     operative = {
         model: operative_forecasts(_load_published(session, prefix))
         for model, prefix in (
@@ -334,12 +416,10 @@ def score_published_forecasts(
         data[model] = ([f.probs for f in ordered], [f.outcome for f in ordered])
 
     evaluations = {model: evaluate_model(model, *data[model]) for model in data}
-    paired = (
-        paired_bootstrap(
-            _per_match_log_loss(*data[ENGINE_MODEL]), _per_match_log_loss(*data[BASELINE_MODEL])
-        )
-        if engine_ids
-        else PairedTest(0.0, 0.0, 0.0, 1.0)
+    if not engine_ids:
+        return LiveScoreReport(0, evaluations, PairedTest(0.0, 0.0, 0.0, 1.0))
+    paired = paired_bootstrap(
+        per_match_log_loss(*data[ENGINE_MODEL]), per_match_log_loss(*data[BASELINE_MODEL])
     )
 
     run_id = f"live_scoring_{as_of.isoformat()}"
@@ -359,22 +439,7 @@ def score_published_forecasts(
     session.add(run)
     session.flush()
 
-    baseline_eval = evaluations[BASELINE_MODEL]
-    metric_rows: list[dict[str, object]] = []
-    for model, evaluation in evaluations.items():
-        values = {
-            "log_loss": evaluation.log_loss,
-            "brier": evaluation.brier,
-            "rps": evaluation.rps,
-            "ece": evaluation.ece,
-            "accuracy": evaluation.accuracy,
-            "skill_log_loss_vs_elo": skill_score(evaluation.log_loss, baseline_eval.log_loss),
-            "skill_brier_vs_elo": skill_score(evaluation.brier, baseline_eval.brier),
-        }
-        metric_rows.extend(
-            {"backtest_run_id": run.id, "model_name": model, "metric": metric, "value": value}
-            for metric, value in values.items()
-        )
+    metric_rows = evaluation_metric_rows(run.id, evaluations, BASELINE_MODEL)
     metric_rows.extend(
         {"backtest_run_id": run.id, "model_name": ENGINE_MODEL, "metric": metric, "value": value}
         for metric, value in (
@@ -382,8 +447,7 @@ def score_published_forecasts(
             ("paired_p_value", paired.p_value),
         )
     )
-    if metric_rows:
-        session.execute(insert(BacktestMetric), metric_rows)
+    session.execute(insert(BacktestMetric), metric_rows)
     session.flush()
     return LiveScoreReport(len(engine_ids), evaluations, paired)
 
@@ -392,5 +456,5 @@ def summarize_known(known: KnownResults, warnings: Sequence[str]) -> str:
     """One line for run configs / logs describing what a re-simulation held fixed."""
     return (
         f"{len(known.group_scores)} group results + {len(known.knockout_winners)} knockout "
-        f"winners fixed; {len(warnings)} undecided"
+        f"winners + {len(known.r32_pairings)} R32 pairings fixed; {len(warnings)} undecided"
     )

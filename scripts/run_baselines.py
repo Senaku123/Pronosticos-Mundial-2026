@@ -10,7 +10,6 @@ baseline. Shows a tqdm progress bar per baseline. Idempotent (re-running overwri
 from __future__ import annotations
 
 import platform
-import subprocess
 import sys
 
 from sqlalchemy import select
@@ -20,16 +19,7 @@ from wc26.database.base import get_session_factory
 from wc26.database.models import MatchFeature
 from wc26.models.baselines import BASELINES
 from wc26.models.predict import reset_model_run, store_predictions
-
-
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
+from wc26.utils.provenance import git_sha as _git_sha
 
 
 def main(argv: list[str]) -> int:

@@ -13,7 +13,6 @@ to get an early look at the data. The calibrated engine and its evaluation come 
 from __future__ import annotations
 
 import platform
-import subprocess
 import sys
 
 from sqlalchemy import select
@@ -25,16 +24,7 @@ from wc26.database.models import Match, Team, Tournament
 from wc26.features.cutoff import get_rating_as_of
 from wc26.models.baselines import simple_poisson
 from wc26.models.predict import reset_model_run, store_predictions
-
-
-def _git_sha() -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        )
-        return out.stdout.strip() or None
-    except (subprocess.SubprocessError, OSError):
-        return None
+from wc26.utils.provenance import git_sha as _git_sha
 
 
 def main(argv: list[str]) -> int:

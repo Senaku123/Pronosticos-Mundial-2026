@@ -22,6 +22,17 @@ HOME, DRAW, AWAY = 0, 1, 2
 ProbTriplet = tuple[float, float, float]
 
 
+def outcome_index(home_score: int, away_score: int) -> int:
+    """W/D/L class of a final score: 0 = home win, 1 = draw, 2 = away win.
+
+    The single definition of the encoding every fit/evaluation depends on - it must stay in
+    sync with the class order PlattCalibrator.fit and the metric helpers assume.
+    """
+    if home_score > away_score:
+        return HOME
+    return DRAW if home_score == away_score else AWAY
+
+
 def _logit(p: float) -> float:
     p = min(max(p, 1e-6), 1.0 - 1e-6)
     return math.log(p / (1.0 - p))
