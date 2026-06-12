@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import cache
 
 from wc26.models.baselines import (
     BaselineConfig,
@@ -51,10 +52,15 @@ def dixon_coles_tau(
     return 1.0
 
 
+@cache
 def dixon_coles_matrix(
     lambda_home: float, lambda_away: float, rho: float, max_goals: int
 ) -> list[list[float]]:
-    """Dixon-Coles scoreline matrix P[i][j], renormalized to sum to 1."""
+    """Dixon-Coles scoreline matrix P[i][j], renormalized to sum to 1.
+
+    Memoized: with a fixed set of team strengths the same (lambda, rho) recur across millions of
+    Monte Carlo matches, so each distinct matrix is built only once. Callers must NOT mutate it.
+    """
     home = [_poisson_pmf(i, lambda_home) for i in range(max_goals + 1)]
     away = [_poisson_pmf(j, lambda_away) for j in range(max_goals + 1)]
     matrix = [

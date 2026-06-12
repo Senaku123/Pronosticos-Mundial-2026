@@ -376,3 +376,47 @@ class BacktestMetric(Base):
             "backtest_run_id", "model_name", "metric", name="uq_backtest_metrics_run_model_metric"
         ),
     )
+
+
+class TournamentSimulation(Base):
+    """One Monte Carlo simulation of a tournament (addendum §8, §9). Aggregates only."""
+
+    __tablename__ = "tournament_simulations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(80), unique=True)
+    model_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("model_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    n_simulations: Mapped[int] = mapped_column(Integer)
+    random_seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cutoff_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    git_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    python_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    config_json: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SimulationResult(Base):
+    """Aggregated stage probability for one team in one tournament simulation (addendum §9)."""
+
+    __tablename__ = "simulation_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tournament_simulation_id: Mapped[int] = mapped_column(
+        ForeignKey("tournament_simulations.id", ondelete="CASCADE")
+    )
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    stage: Mapped[str] = mapped_column(String(16))
+    probability: Mapped[float] = mapped_column(Float)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tournament_simulation_id",
+            "team_id",
+            "stage",
+            name="uq_simulation_results_sim_team_stage",
+        ),
+    )

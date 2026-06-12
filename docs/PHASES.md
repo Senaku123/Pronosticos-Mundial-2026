@@ -193,6 +193,13 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 10 — Tournament simulation engine (Monte Carlo)
 
+> **Estado: implementada (2026-06-11).** Simulador Monte Carlo del Mundial 2026: 12 grupos con la
+> cascada de desempates verificada, R32 con el bracket oficial (16 cruces + conjuntos de 5 grupos
+> por slot de tercero; asignación que respeta restricciones, sin revanchas — Annex C exacto
+> pendiente), eliminatorias con 90'→prórroga→penales. **50.000 simulaciones** (memoizadas) →
+> `simulation_results`. **Probabilidades de campeón:** Spain 9.5%, Argentina 8.6%, France 6.3%,
+> England 5.1%, Brazil 4.9%. Monótonas y futbolísticamente plausibles. 63 tests en verde.
+
 - **Objetivo:** simulador completo con realismo de formato 2026.
 - **Entregables:** Monte Carlo (N ≥ 50k); `third_place_bracket_mapping`; resolución knockout
   (90'→ET→penales); desempates de grupos; persistencia **solo de agregados** (`simulation_results`)
