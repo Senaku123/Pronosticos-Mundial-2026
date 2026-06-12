@@ -11,6 +11,7 @@ fitting and scoring on the same data flatters the model. These functions are pur
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -74,6 +75,29 @@ class PlattCalibrator:
         c_away = _sigmoid(self.a_away * _logit(p_away) + self.b_away)
         total = c_home + c_draw + c_away
         return c_home / total, c_draw / total, c_away / total
+
+    def to_dict(self) -> dict[str, float]:
+        """Six Platt parameters as a plain dict, for persisting in a run's ``config_json``."""
+        return {
+            "a_home": self.a_home,
+            "b_home": self.b_home,
+            "a_draw": self.a_draw,
+            "b_draw": self.b_draw,
+            "a_away": self.a_away,
+            "b_away": self.b_away,
+        }
+
+    @classmethod
+    def from_dict(cls, params: Mapping[str, float]) -> PlattCalibrator:
+        """Rebuild a calibrator from persisted parameters (e.g. the official run's config)."""
+        return cls(
+            a_home=float(params["a_home"]),
+            b_home=float(params["b_home"]),
+            a_draw=float(params["a_draw"]),
+            b_draw=float(params["b_draw"]),
+            a_away=float(params["a_away"]),
+            b_away=float(params["b_away"]),
+        )
 
 
 def calibrate_matrix(matrix: list[list[float]], calibrator: PlattCalibrator) -> list[list[float]]:

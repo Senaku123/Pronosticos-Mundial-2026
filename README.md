@@ -8,7 +8,9 @@ This is **not** an "AI predicts the World Cup" gimmick. It is a modular, reprodu
 explainable system grounded in statistics, careful backtesting, and honest uncertainty reporting.
 Every quality claim is measured against baselines; nothing is asserted without evaluation.
 
-> **Status:** early stage (documentation and architecture). No productive code yet.
+> **Status:** Phases 0-12 implemented — data pipeline, anti-leakage Elo, calibrated Dixon-Coles
+> (GO gate passed), Monte Carlo simulator (2026 + historical 32-team backtest) and the live
+> publish/score flow for the ongoing tournament. Next: FastAPI backend (Phase 13).
 > Planning documents live in [`docs/`](docs/) and are written in Spanish (project guidance
 > language). All technical identifiers are in English.
 

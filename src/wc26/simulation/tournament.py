@@ -15,6 +15,7 @@ import numpy as np
 
 from wc26.models.calibration import PlattCalibrator
 from wc26.models.dixon_coles import DixonColesConfig
+from wc26.simulation.conditioning import KnownResults
 from wc26.simulation.groups import TeamStanding, simulate_group
 from wc26.simulation.knockout import HOME, resolve_knockout
 from wc26.simulation.structure import (
@@ -83,8 +84,14 @@ def simulate_tournament(
     config: DixonColesConfig,
     rng: np.random.Generator,
     calibrator: PlattCalibrator | None = None,
+    known: KnownResults | None = None,
 ) -> dict[str, str]:
-    """Simulate the whole tournament once; return each team's deepest stage reached."""
+    """Simulate the whole tournament once; return each team's deepest stage reached.
+
+    ``known`` (Phase 12 live re-simulation) holds real results fixed: group scorelines are
+    replayed exactly and decided knockout pairs advance their real winner; only the remaining
+    matches are sampled.
+    """
     reached: dict[str, str] = {team: "group" for group in GROUPS_2026.values() for team in group}
 
     winners: dict[str, str] = {}
@@ -92,7 +99,14 @@ def simulate_tournament(
     thirds: list[tuple[str, TeamStanding]] = []
     for letter, teams in GROUPS_2026.items():
         elos = {t: team_elos[t] for t in teams}
-        standings = simulate_group(elos, config, rng, hosts=HOSTS_2026)
+        standings = simulate_group(
+            elos,
+            config,
+            rng,
+            hosts=HOSTS_2026,
+            known_scores=known.group_scores if known else None,
+            calibrator=calibrator,
+        )
         winners[letter] = standings[0].team
         runners_up[letter] = standings[1].team
         thirds.append((letter, standings[2]))
@@ -107,6 +121,14 @@ def simulate_tournament(
     for team in (*winners.values(), *runners_up.values(), *third_by_group.values()):
         reached[team] = "round_of_32"
 
+    def knockout_winner(home: str, away: str) -> str:
+        if known:
+            fixed = known.knockout_winners.get(frozenset((home, away)))
+            if fixed is not None:
+                return fixed
+        result = resolve_knockout(team_elos[home], team_elos[away], True, config, rng, calibrator)
+        return home if result == HOME else away
+
     winner_of: dict[int, str] = {}
     for match_no, home_slot, away_slot in R32_MATCHES:
         home = _slot_team(
@@ -115,8 +137,7 @@ def simulate_tournament(
         away = _slot_team(
             away_slot, match_no, winners, runners_up, third_by_group, third_assignment
         )
-        result = resolve_knockout(team_elos[home], team_elos[away], True, config, rng, calibrator)
-        winner_of[match_no] = home if result == HOME else away
+        winner_of[match_no] = knockout_winner(home, away)
 
     for stage, matches in (
         ("round_of_16", ROUND_OF_16),
@@ -129,10 +150,7 @@ def simulate_tournament(
             away = winner_of[source_away]
             reached[home] = stage
             reached[away] = stage
-            result = resolve_knockout(
-                team_elos[home], team_elos[away], True, config, rng, calibrator
-            )
-            winner_of[match_no] = home if result == HOME else away
+            winner_of[match_no] = knockout_winner(home, away)
 
     reached[winner_of[FINAL[0][0]]] = "champion"
     return reached
@@ -144,6 +162,7 @@ def run_monte_carlo(
     n_simulations: int,
     seed: int,
     calibrator: PlattCalibrator | None = None,
+    known: KnownResults | None = None,
 ) -> dict[str, dict[str, float]]:
     """Run ``n_simulations`` and return cumulative stage probabilities per team.
 
@@ -158,7 +177,7 @@ def run_monte_carlo(
     rng = np.random.default_rng(seed)
     counts = {team: dict.fromkeys(STAGES, 0) for team in expected}
     for _ in range(n_simulations):
-        reached = simulate_tournament(team_elos, config, rng, calibrator)
+        reached = simulate_tournament(team_elos, config, rng, calibrator, known)
         for team, stage in reached.items():
             for s in STAGES[: STAGES.index(stage) + 1]:
                 counts[team][s] += 1

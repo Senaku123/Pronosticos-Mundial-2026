@@ -9,10 +9,12 @@ internal Elo (we do not ingest the FIFA ranking). Both are noted as limitations.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
 
+from wc26.models.calibration import PlattCalibrator
 from wc26.models.dixon_coles import DixonColesConfig
 from wc26.simulation.match_sampler import sample_match
 
@@ -122,19 +124,27 @@ def simulate_group(
     config: DixonColesConfig,
     rng: np.random.Generator,
     hosts: frozenset[str] = frozenset(),
+    known_scores: Mapping[frozenset[str], Mapping[str, int]] | None = None,
+    calibrator: PlattCalibrator | None = None,
 ) -> list[TeamStanding]:
     """Simulate a round-robin group once; return standings ordered 1st..last.
 
     Group matches are neutral except for teams in ``hosts`` (Mexico/USA/Canada play their whole
     group stage in their own country), which receive the home advantage the model was fit with.
+    Pairings present in ``known_scores`` (real results, Phase 12 re-simulation) are held fixed
+    instead of sampled; goals are labeled by team so orientation cannot flip them.
     """
     standings = {team: TeamStanding(team, elo) for team, elo in team_elos.items()}
     head_to_head: dict[tuple[str, str], tuple[int, int]] = {}
     for first, second in itertools.combinations(team_elos, 2):
         home, away, neutral = orient_for_host(first, second, hosts)
-        home_goals, away_goals = sample_match(
-            team_elos[home], team_elos[away], neutral, config, rng
-        )
+        known = known_scores.get(frozenset((home, away))) if known_scores else None
+        if known is not None:
+            home_goals, away_goals = known[home], known[away]
+        else:
+            home_goals, away_goals = sample_match(
+                team_elos[home], team_elos[away], neutral, config, rng, calibrator
+            )
         _apply(standings[home], home_goals, away_goals)
         _apply(standings[away], away_goals, home_goals)
         head_to_head[(home, away)] = (home_goals, away_goals)

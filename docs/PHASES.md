@@ -202,9 +202,11 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 > respeta restricciones — Annex C exacto pendiente; sin fallback inseguro); knockout
 > 90'→prórroga **Dixon-Coles con ρ**→penales. El muestreo usa la **matriz calibrada (Platt)** —
 > la configuración que ganó el GO — vía `calibrate_matrix` (zonas re-escaladas, única fuente de
-> verdad intacta). **50.000 simulaciones** → `simulation_results`. **P(campeón):** Spain 19.1%,
-> Argentina 15.6%, France 10.9%, Brazil 6.9%, England 6.2% (la calibración des-comprime a los
-> favoritos; alineado con mercados). 66 tests en verde.
+> verdad intacta). **50.000 simulaciones** → `simulation_results`. **Fix (2026-06-12, Phase 12):**
+> los partidos de **grupos** se muestreaban de la matriz **cruda** (solo el knockout recibía el
+> calibrador); `simulate_group` ahora recibe el calibrador y la corrida oficial se regeneró.
+> **P(campeón) (post-fix):** Spain 20.3%, Argentina 17.2%, France 12.3%, Brazil 6.9%,
+> England 6.4% (la calibración des-comprime a los favoritos; alineado con mercados).
 
 - **Objetivo:** simulador completo con realismo de formato 2026.
 - **Entregables:** Monte Carlo (N ≥ 50k); `third_place_bracket_mapping`; resolución knockout
@@ -220,6 +222,20 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 11 — Tournament-level backtesting (sanity check)
 
+> **Estado: implementada (2026-06-12). Sanity check superado ✅.** Formato 32 equipos
+> (`structure32.py`: plantilla R16/QF/SF constante 2010–2022, verificada edición por edición) +
+> motor `tournament32.py` reutilizando `simulate_group`/`resolve_knockout`; grupos hardcodeados
+> **cross-validados contra `matches`** (un mismatch aborta; no se simula una estructura
+> equivocada); etapa real inferida por conteo de partidos (final empatada → campeón registrado,
+> asertado contra los finalistas). Corrida real (50k sims/edición, fit ρ+Platt estricto
+> pre-torneo): RPS de fase 0,0943/0,1016/0,1097/0,1048 (2010/14/18/22), media **0,1026**
+> [0,0969, 0,1076] (block bootstrap por torneo) vs **0,1271** del baseline `format_uniform` →
+> skill **+0,19**; log loss de campeón 1,92 vs 3,47; **campeones reales en top-5 en las 4
+> ediciones** (Spain #1, Germany #3, France #5, Argentina #2). `backtest_runs`
+> (`tournament_level_v1`, level='tournament') + métricas. Limitaciones documentadas: cascada de
+> desempate 2026 aplicada a ediciones históricas (diverge solo en empates exactos raros) y
+> knockout neutral.
+
 - **Objetivo:** validar el motor de propagación con Mundiales 2010–2022.
 - **Entregables:** simulaciones históricas con cutoff; RPS de distribución de fase; block bootstrap
   por torneo; reporte de validez externa (32→48).
@@ -231,6 +247,21 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 - **NO hacer todavía:** usar estos resultados para elegir modelo.
 
 ## Phase 12 — 2026 tournament simulation + live forecasting & scoring
+
+> **Estado: implementada (2026-06-12).** `run_2026_simulation.py` con tres flujos:
+> **simulate** (re-simula las rondas restantes fijando resultados reales vía `KnownResults` —
+> marcadores de grupo etiquetados por equipo y ganadores de knockout; empate de knockout sin
+> ganador derivable se deja simulado con warning, nunca se adivina — y reporta **bandas de error
+> Monte Carlo**), **publish** (congela W/D/L pre-partido del motor **y** del baseline Elo-only
+> con el mismo Elo as-of de la fecha de publicación, como `model_runs` fechados e idempotentes;
+> matriz calibrada = única fuente de verdad) y **score** (puntúa lo publicado contra el baseline
+> con bootstrap pareado y lo registra en `backtest_runs` con `backtest_level='live'`; por partido
+> puntúa la **última publicación ≤ día del partido** — leakage-safe porque el lookup as-of es
+> estrictamente anterior). Verificado end-to-end el 2026-06-12: 70 fixtures publicados (los del
+> 11-jun ya iniciados se excluyen, no se "publica" el pasado), re-simulación 50k con 0 resultados
+> fijados (snapshot upstream aún sin los partidos del 11-jun, hash idéntico verificado) → Spain
+> 20,6% ±0,4. Configuración del motor (ρ + Platt) = fit pre-torneo que ganó el GO, persistida en
+> `config_json`. Operación diaria: download → ingest → compute_elo → score → publish → simulate.
 
 - **Objetivo:** simular 2026 y operar durante el torneo.
 - **Entregables:** simulación 2026 (probabilidades por fase y campeón con bandas); flujo de **live

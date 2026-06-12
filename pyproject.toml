@@ -51,7 +51,7 @@ strict = true
 
 # Third-party libraries without bundled type stubs.
 [[tool.mypy.overrides]]
-module = ["pandas.*", "pandera.*", "scipy.*"]
+module = ["pandas.*", "pandera.*", "scipy.*", "tqdm.*"]
 ignore_missing_imports = true
 
 # The data module wraps untyped pandas/pandera calls; relax related noise there only.
