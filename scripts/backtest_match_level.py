@@ -7,9 +7,10 @@ Evaluates every stored model on the out-of-time test block (matches >= 2018), re
 Brier, RPS, ECE and accuracy, skill scores vs the Elo-only baseline, a paired bootstrap of the
 champion vs the baseline, and the GO/NO-GO verdict. Stores backtest_runs + backtest_metrics.
 
-NOTE: this evaluates already-stored predictions on a held-out block (calibration was fit on
-< 2018). A strict per-cutoff walk-forward that re-fits everything each fold is a refinement; the
-out-of-time block here is a sound match-level comparison and a real go/no-go.
+NOTE: this evaluates already-stored predictions on a held-out block. BOTH Dixon-Coles parameters
+(rho and the Platt calibration) were fit only on matches < 2018 (see calibrate_dc.py), so the
+test block is genuinely out-of-time. This is a single out-of-time split, not a full per-cutoff
+walk-forward (documented refinement for later).
 """
 
 from __future__ import annotations
@@ -70,13 +71,20 @@ def _load(session, run_id: str):
     ).all()
     probs = [(r.p_home_win, r.p_draw, r.p_away_win) for r in rows]
     outcomes = [_outcome(r.home_score, r.away_score) for r in rows]
-    return probs, outcomes
+    match_ids = [r.match_id for r in rows]
+    return probs, outcomes, match_ids
 
 
 def main(argv: list[str]) -> int:
     session_factory = get_session_factory()
     with session_factory() as session:
-        data = {m: _load(session, m) for m in tqdm(MODELS, desc="loading models", unit="model")}
+        loaded = {m: _load(session, m) for m in tqdm(MODELS, desc="loading models", unit="model")}
+        # Paired metrics require every model to cover EXACTLY the same matches, in order.
+        reference_ids = loaded[BASELINE][2]
+        for name, (_, _, ids) in loaded.items():
+            if ids != reference_ids:
+                raise ValueError(f"model '{name}' covers different matches than '{BASELINE}'")
+        data = {m: (probs, outcomes) for m, (probs, outcomes, _) in loaded.items()}
         evals = {m: evaluate_model(m, *data[m]) for m in MODELS}
 
         base = evals[BASELINE]

@@ -38,13 +38,11 @@ def _apply(standing: TeamStanding, scored: int, conceded: int) -> None:
     standing.points += 3 if scored > conceded else (1 if scored == conceded else 0)
 
 
-def _break_ties(
-    tied: list[str],
-    standings: dict[str, TeamStanding],
-    head_to_head: dict[tuple[str, str], tuple[int, int]],
-) -> list[str]:
-    """Order teams equal on points: head-to-head mini-table, then overall GD/GF, then Elo."""
-    mini: dict[str, list[int]] = {t: [0, 0, 0] for t in tied}  # points, gf, ga among tied teams
+def _h2h_table(
+    tied: list[str], head_to_head: dict[tuple[str, str], tuple[int, int]]
+) -> dict[str, tuple[int, int, int]]:
+    """Mini-table (points, GD, GF) restricted to the matches among the given teams."""
+    mini: dict[str, list[int]] = {t: [0, 0, 0] for t in tied}  # points, gf, ga
     for a, b in itertools.combinations(tied, 2):
         a_goals, b_goals = (
             head_to_head[(a, b)] if (a, b) in head_to_head else head_to_head[(b, a)][::-1]
@@ -55,13 +53,48 @@ def _break_ties(
         mini[a][2] += b_goals
         mini[b][1] += b_goals
         mini[b][2] += a_goals
+    return {t: (mini[t][0], mini[t][1] - mini[t][2], mini[t][1]) for t in tied}
 
-    def key(team: str) -> tuple[int, int, int, int, int, float]:
-        h2h_points, h2h_gf, h2h_ga = mini[team]
-        s = standings[team]
-        return (h2h_points, h2h_gf - h2h_ga, h2h_gf, s.goal_difference, s.goals_for, s.elo)
 
-    return sorted(tied, key=key, reverse=True)
+def _break_ties(
+    tied: list[str],
+    standings: dict[str, TeamStanding],
+    head_to_head: dict[tuple[str, str], tuple[int, int]],
+) -> list[str]:
+    """Order teams equal on points per FIFA 2026 Article 13 (addendum §7).
+
+    Step 1: head-to-head mini-table (points, GD, GF) among the tied teams. Step 2: any strict
+    subset still tied on those criteria gets the head-to-head RE-APPLIED among themselves only
+    (recursion). Only when the whole set stays tied do the overall criteria apply:
+    overall GD -> overall GF -> Elo (our documented proxy for the FIFA-ranking criterion).
+    """
+    if len(tied) == 1:
+        return tied
+    h2h = _h2h_table(tied, head_to_head)
+    ordered = sorted(tied, key=lambda t: h2h[t], reverse=True)
+
+    result: list[str] = []
+    for _, grp in itertools.groupby(ordered, key=lambda t: h2h[t]):
+        subset = list(grp)
+        if len(subset) == 1:
+            result.extend(subset)
+        elif len(subset) < len(tied):
+            # Step 2: re-apply head-to-head restricted to the still-tied subset.
+            result.extend(_break_ties(subset, standings, head_to_head))
+        else:
+            # Whole set tied on head-to-head -> overall criteria.
+            result.extend(
+                sorted(
+                    subset,
+                    key=lambda t: (
+                        standings[t].goal_difference,
+                        standings[t].goals_for,
+                        standings[t].elo,
+                    ),
+                    reverse=True,
+                )
+            )
+    return result
 
 
 def rank_group(
@@ -77,16 +110,28 @@ def rank_group(
     return ranked
 
 
+def orient_for_host(home: str, away: str, hosts: frozenset[str]) -> tuple[str, str, bool]:
+    """Return (home, away, neutral): a host team plays at home, everything else is neutral."""
+    if away in hosts and home not in hosts:
+        home, away = away, home
+    return home, away, home not in hosts
+
+
 def simulate_group(
     team_elos: dict[str, float],
     config: DixonColesConfig,
     rng: np.random.Generator,
-    neutral: bool = True,
+    hosts: frozenset[str] = frozenset(),
 ) -> list[TeamStanding]:
-    """Simulate a round-robin group once; return standings ordered 1st..last."""
+    """Simulate a round-robin group once; return standings ordered 1st..last.
+
+    Group matches are neutral except for teams in ``hosts`` (Mexico/USA/Canada play their whole
+    group stage in their own country), which receive the home advantage the model was fit with.
+    """
     standings = {team: TeamStanding(team, elo) for team, elo in team_elos.items()}
     head_to_head: dict[tuple[str, str], tuple[int, int]] = {}
-    for home, away in itertools.combinations(team_elos, 2):
+    for first, second in itertools.combinations(team_elos, 2):
+        home, away, neutral = orient_for_host(first, second, hosts)
         home_goals, away_goals = sample_match(
             team_elos[home], team_elos[away], neutral, config, rng
         )

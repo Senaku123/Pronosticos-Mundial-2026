@@ -106,7 +106,16 @@ def _dc_neg_log_likelihood(
 def fit_rho(
     samples: list[tuple[float, float, int, int]], bounds: tuple[float, float] = (-0.3, 0.3)
 ) -> float:
-    """Fit the Dixon-Coles rho by MLE. ``samples`` are (lambda_home, lambda_away, home, away)."""
+    """Fit the Dixon-Coles rho by MLE. ``samples`` are (lambda_home, lambda_away, home, away).
+
+    Restricting the likelihood to the four low-score cells is exact, not an approximation: the
+    four tau corrections cancel in the matrix total (the normalization does not depend on rho),
+    so only those cells carry information about rho. Caveats (documented hypotheses): no temporal
+    decay weighting (all matches weigh equally, unlike the original DC paper's xi), and this is a
+    CONDITIONAL MLE — lambdas come fixed from the Elo mapping, so rho also absorbs any low-score
+    mis-specification of that mapping. Validity requires tau > 0 within ``bounds``, guaranteed by
+    the lambda clamps in ``elo_to_lambdas``.
+    """
     from scipy.optimize import minimize_scalar
 
     low_score = [s for s in samples if s[2] <= 1 and s[3] <= 1]

@@ -3,9 +3,10 @@
 Usage:
     uv run python scripts/simulate_wc2026.py [n_simulations]
 
-Loads each team's as-of Elo (the strength going into the tournament), fits Dixon-Coles rho,
-runs the Monte Carlo simulator and stores per-team stage probabilities. Prints the title odds.
-Requires the database with elo_ratings + match_features seeded.
+Loads each team's as-of Elo (the strength going into the tournament), fits Dixon-Coles rho AND
+the Platt calibration layer on matches strictly before the tournament (the configuration that won
+the Phase 8 go/no-go), runs the Monte Carlo simulator on calibrated matrices and stores per-team
+stage probabilities. Prints the title odds. Requires elo_ratings + match_features seeded.
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ from wc26.database.models import (
 )
 from wc26.features.cutoff import get_rating_as_of
 from wc26.models.baselines import BaselineConfig, elo_to_lambdas
-from wc26.models.dixon_coles import DixonColesConfig, fit_rho
+from wc26.models.calibration import PlattCalibrator
+from wc26.models.dixon_coles import DixonColesConfig, fit_rho, predict_dixon_coles
 from wc26.simulation.structure import GROUPS_2026, STAGES
 from wc26.simulation.tournament import run_monte_carlo
 
@@ -51,7 +53,7 @@ def main(argv: list[str]) -> int:
     base = BaselineConfig()
     session_factory = get_session_factory()
     with session_factory() as session:
-        # Fit rho on played matches (lambdas from Elo).
+        # Fit rho AND the Platt calibrator on matches strictly before the tournament cutoff.
         training = session.execute(
             select(
                 MatchFeature.elo_home,
@@ -59,13 +61,28 @@ def main(argv: list[str]) -> int:
                 MatchFeature.is_neutral,
                 Match.home_score,
                 Match.away_score,
-            ).join(Match, Match.id == MatchFeature.match_id)
+            )
+            .join(Match, Match.id == MatchFeature.match_id)
+            .where(Match.match_date < TOURNAMENT_START)
         ).all()
         samples = []
         for elo_home, elo_away, neutral, hs, away_s in training:
             lh, la = elo_to_lambdas(elo_home, elo_away, neutral, base)
             samples.append((lh, la, int(hs), int(away_s)))
         cfg = DixonColesConfig(rho=fit_rho(samples))
+
+        print("[ok] fitting Platt calibration on pre-tournament matches ...")
+        cal_probs = []
+        cal_outcomes = []
+        for elo_home, elo_away, neutral, hs, away_s in tqdm(
+            training, desc="calibration fit", unit="match"
+        ):
+            pred, _ = predict_dixon_coles(elo_home, elo_away, neutral, cfg)
+            cal_probs.append((pred.p_home_win, pred.p_draw, pred.p_away_win))
+            cal_outcomes.append(
+                0 if int(hs) > int(away_s) else (1 if int(hs) == int(away_s) else 2)
+            )
+        calibrator = PlattCalibrator.fit(cal_probs, cal_outcomes)
 
         # As-of Elo for the 48 teams + their team ids.
         team_ids = {
@@ -83,9 +100,11 @@ def main(argv: list[str]) -> int:
         if missing:
             print(f"[warn] teams not found in DB (using base Elo): {missing}")
 
-        print(f"[ok] running {n_sims} simulations (rho={cfg.rho:.4f}) ...")
+        print(
+            f"[ok] running {n_sims} simulations (rho={cfg.rho:.4f}, calibrated, hosts at home) ..."
+        )
         with tqdm(total=1, desc="Monte Carlo", unit="run") as bar:
-            probabilities = run_monte_carlo(team_elos, cfg, n_sims, SEED)
+            probabilities = run_monte_carlo(team_elos, cfg, n_sims, SEED, calibrator)
             bar.update(1)
 
         # Persist run + aggregated results.
@@ -98,7 +117,10 @@ def main(argv: list[str]) -> int:
             cutoff_date=TOURNAMENT_START,
             git_sha=_git_sha(),
             python_version=platform.python_version(),
-            config_json=f'{{"rho": {cfg.rho:.4f}, "model": "dixon_coles"}}',
+            config_json=(
+                f'{{"rho": {cfg.rho:.4f}, "model": "dixon_coles_calibrated", '
+                f'"calibration": "platt_pre_tournament", "hosts_home_advantage": "group_stage"}}'
+            ),
         )
         session.add(sim)
         session.flush()

@@ -7,8 +7,10 @@ Predicts Dixon-Coles W/D/L for every played match, splits TEMPORALLY (train < 20
 fits Platt scaling on the train block and measures reliability (log loss, Brier, ECE) on the test
 block (out-of-time). Stores raw + calibrated predictions and the reliability curves.
 
-NOTE: rho is fit on all played matches here (a single global parameter); the strict walk-forward
-discipline is Phase 8. This step demonstrates and measures the calibration layer out-of-time.
+BOTH model parameters respect the split: rho (Dixon-Coles) and the Platt layer are fit ONLY on
+matches before SPLIT_DATE, so the >= 2018 test block used by the Phase 8 go/no-go is genuinely
+out-of-time (no leakage). This is a single out-of-time split, not a full per-cutoff walk-forward
+(documented refinement).
 """
 
 from __future__ import annotations
@@ -96,11 +98,13 @@ def main(argv: list[str]) -> int:
 
         samples = []
         for r in rows:
+            if r.match_date >= SPLIT_DATE:
+                continue  # rho is fit on the train block ONLY (no test leakage)
             lh, la = elo_to_lambdas(r.elo_home, r.elo_away, r.is_neutral, base)
             samples.append((lh, la, int(r.home_score), int(r.away_score)))
         rho = fit_rho(samples)
         cfg = DixonColesConfig(rho=rho)
-        print(f"[ok] Dixon-Coles rho={rho:.4f}")
+        print(f"[ok] Dixon-Coles rho={rho:.4f} (fit on {len(samples)} matches < {SPLIT_DATE})")
 
         records = []  # (match_id, probs, outcome, date)
         for r in tqdm(rows, desc="Dixon-Coles predict", unit="match"):
@@ -135,7 +139,7 @@ def main(argv: list[str]) -> int:
             model_name="dixon_coles",
             git_sha=_git_sha(),
             python_version=platform.python_version(),
-            config_json=f'{{"rho": {rho:.4f}}}',
+            config_json=f'{{"rho": {rho:.4f}, "rho_fit": "pre-{SPLIT_DATE}"}}',
         )
         store_predictions(session, _prediction_rows(raw_run, [(m, p) for m, p, _, _ in records]))
         cal_config = f'{{"rho": {rho:.4f}, "calibration": "platt", "split_date": "{SPLIT_DATE}"}}'

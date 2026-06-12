@@ -159,12 +159,14 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 8 — Match-level backtesting + GO/NO-GO gate
 
-> **Estado: implementada (2026-06-11). VEREDICTO: GO ✅.** Backtest out-of-time (test ≥2018,
-> n=8107). `dixon_coles_calibrated` vs baseline `elo_only`: log loss 0.873 vs 0.895, Brier 0.514 vs
-> 0.522, RPS 0.171 vs 0.172, ECE 0.021 vs 0.046 — y bootstrap pareado significativo (mean diff
-> −0.021, CI [−0.026,−0.017], p=0.0000). **Dato clave:** el DC crudo NO supera a Elo-only
-> (skill −0.049); **solo el calibrado** lo hace → valida la capa de calibración. Tablas
-> `backtest_runs`/`backtest_metrics`. Luz verde para frontend/V2.
+> **Estado: implementada (2026-06-11). VEREDICTO: GO ✅ (re-certificado tras auditoría).**
+> Backtest **out-of-time de split único** (test ≥2018, n=8107; el walk-forward por-cutoff completo
+> queda como refinamiento). ρ **y** Platt ajustados solo con <2018 (auditoría detectó y se corrigió
+> un leakage de ρ; los números no cambiaron materialmente). `dixon_coles_calibrated` vs `elo_only`:
+> log loss 0.873 vs 0.895, Brier 0.514 vs 0.522, RPS 0.171 vs 0.172, ECE 0.021 vs 0.046 — bootstrap
+> pareado (con verificación de alineación de partidos): mean diff −0.021, CI [−0.026,−0.017],
+> p=0.0000. **Dato clave:** el DC crudo NO supera a Elo-only (skill −0.049); **solo el calibrado**
+> lo hace → valida la capa de calibración. Luz verde para frontend/V2.
 
 - **Objetivo:** seleccionar modelo y validar contra baselines (criterio principal).
 - **Entregables:** walk-forward expanding-window; métricas (log loss, Brier, RPS, calibración);
@@ -193,17 +195,21 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 10 — Tournament simulation engine (Monte Carlo)
 
-> **Estado: implementada (2026-06-11).** Simulador Monte Carlo del Mundial 2026: 12 grupos con la
-> cascada de desempates verificada, R32 con el bracket oficial (16 cruces + conjuntos de 5 grupos
-> por slot de tercero; asignación que respeta restricciones, sin revanchas — Annex C exacto
-> pendiente), eliminatorias con 90'→prórroga→penales. **50.000 simulaciones** (memoizadas) →
-> `simulation_results`. **Probabilidades de campeón:** Spain 9.5%, Argentina 8.6%, France 6.3%,
-> England 5.1%, Brazil 4.9%. Monótonas y futbolísticamente plausibles. 63 tests en verde.
+> **Estado: implementada y endurecida por auditoría (2026-06-11).** Simulador Monte Carlo del
+> Mundial 2026: 12 grupos con la cascada Article 13 **incluida la re-aplicación del head-to-head
+> (Step 2)**; anfitriones (MEX/USA/CAN) con **ventaja de localía en fase de grupos** (knockout
+> neutral, simplificación documentada); R32 con el bracket oficial (asignación de terceros que
+> respeta restricciones — Annex C exacto pendiente; sin fallback inseguro); knockout
+> 90'→prórroga **Dixon-Coles con ρ**→penales. El muestreo usa la **matriz calibrada (Platt)** —
+> la configuración que ganó el GO — vía `calibrate_matrix` (zonas re-escaladas, única fuente de
+> verdad intacta). **50.000 simulaciones** → `simulation_results`. **P(campeón):** Spain 19.1%,
+> Argentina 15.6%, France 10.9%, Brazil 6.9%, England 6.2% (la calibración des-comprime a los
+> favoritos; alineado con mercados). 66 tests en verde.
 
 - **Objetivo:** simulador completo con realismo de formato 2026.
 - **Entregables:** Monte Carlo (N ≥ 50k); `third_place_bracket_mapping`; resolución knockout
   (90'→ET→penales); desempates de grupos; persistencia **solo de agregados** (`simulation_results`)
-  + `tournament_simulations` (seed, git_sha, data_hash, cutoff_date); `simulation_sample` opcional.
+  + `tournament_simulations` (seed, git_sha, cutoff_date, config_json); `simulation_sample` opcional.
 - **Archivos:** `src/simulation/*`, migraciones, tests deportivos.
 - **Decisiones técnicas:** addendum §5/§6/§7/§9; error de Monte Carlo reportado; placeholders donde
   FIFA no confirme.

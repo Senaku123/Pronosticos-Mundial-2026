@@ -13,6 +13,10 @@ item (addendum §6). Team names must match ``teams.canonical_name`` in the datab
 
 from __future__ import annotations
 
+# Co-hosts: they play their entire group stage in their own country (home advantage applies).
+# Knockout venues are simulated as neutral for everyone (documented V1 simplification).
+HOSTS_2026: frozenset[str] = frozenset({"Mexico", "United States", "Canada"})
+
 # Group letter -> the four teams (canonical names).
 GROUPS_2026: dict[str, list[str]] = {
     "A": ["Mexico", "South Africa", "South Korea", "Czech Republic"],

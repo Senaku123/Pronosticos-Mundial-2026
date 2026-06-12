@@ -76,6 +76,36 @@ class PlattCalibrator:
         return c_home / total, c_draw / total, c_away / total
 
 
+def calibrate_matrix(matrix: list[list[float]], calibrator: PlattCalibrator) -> list[list[float]]:
+    """Rescale a scoreline matrix's W/D/L zones to the Platt-calibrated triplet.
+
+    Cells keep their relative proportions WITHIN each zone (home-win / draw / away-win), the
+    three zone totals become exactly the calibrated W/D/L, and the matrix still sums to 1. This
+    lets the Monte Carlo simulator inherit the calibration that won the go/no-go while keeping
+    the scoreline matrix as the single source of truth (addendum §2).
+    """
+    raw_home = raw_draw = raw_away = 0.0
+    for i, row in enumerate(matrix):
+        for j, value in enumerate(row):
+            if i > j:
+                raw_home += value
+            elif i == j:
+                raw_draw += value
+            else:
+                raw_away += value
+    cal_home, cal_draw, cal_away = calibrator.calibrate(raw_home, raw_draw, raw_away)
+    factor_home = cal_home / raw_home if raw_home > 0 else 0.0
+    factor_draw = cal_draw / raw_draw if raw_draw > 0 else 0.0
+    factor_away = cal_away / raw_away if raw_away > 0 else 0.0
+    return [
+        [
+            value * (factor_home if i > j else (factor_draw if i == j else factor_away))
+            for j, value in enumerate(row)
+        ]
+        for i, row in enumerate(matrix)
+    ]
+
+
 def reliability_bins(
     class_probs: list[float], class_labels: list[int], n_bins: int = 10
 ) -> list[tuple[int, float, float, int]]:

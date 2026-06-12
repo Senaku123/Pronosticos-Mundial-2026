@@ -20,12 +20,22 @@ def reset_model_run(
     cutoff_date: dt.date | None = None,
     config_json: str | None = None,
 ) -> int:
-    """Create (or clear) a model run by ``run_id`` and return its id (idempotent re-runs)."""
+    """Create (or clear) a model run by ``run_id`` and return its id (idempotent re-runs).
+
+    On re-runs the run's reproducibility metadata is REFRESHED (git_sha, config_json, ...), so
+    the stored metadata always corresponds to the predictions actually in the table (addendum §8).
+    """
     existing = session.execute(
         select(ModelRun).where(ModelRun.run_id == run_id)
     ).scalar_one_or_none()
     if existing is not None:
         session.execute(delete(MatchPrediction).where(MatchPrediction.model_run_id == existing.id))
+        existing.model_name = model_name
+        existing.model_version = model_version
+        existing.git_sha = git_sha
+        existing.python_version = python_version
+        existing.cutoff_date = cutoff_date
+        existing.config_json = config_json
         session.flush()
         return existing.id
     run = ModelRun(
