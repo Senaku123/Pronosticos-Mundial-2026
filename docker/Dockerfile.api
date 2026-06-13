@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1
+# FastAPI read layer (Phase 13). Installs the engine (wc26) + the api group from the lockfile.
+FROM python:3.12-slim AS base
+
+# uv: reproducible installs straight from uv.lock.
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+# Everything uv needs to build wc26 and resolve the api group (no .env: DATABASE_URL comes from
+# the compose environment, pointing at the `db` service, not localhost).
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+COPY apps/api ./apps/api
+
+# main deps + the `api` group (fastapi/uvicorn), excluding dev tooling.
+RUN uv sync --frozen --no-dev --group api
+
+# wc26 is installed in the venv; wc26_api is read from apps/api via PYTHONPATH.
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH=/app/apps/api \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+CMD ["uvicorn", "wc26_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

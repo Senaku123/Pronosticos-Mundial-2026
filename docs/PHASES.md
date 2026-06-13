@@ -352,6 +352,19 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 15 — Documentation, tests & GitHub polish
 
+> **Estado: implementada (núcleo, 2026-06-12).** **Guía de reproducción end-to-end** completa en
+> [`GETTING_STARTED.md`](GETTING_STARTED.md): de cero → datos → identidad → Elo → features →
+> baselines → calibración → forecast → backtest (match + tournament) → simulación 50k → API → web,
+> con orden de operación diaria (Phase 12) y la sección de reproducibilidad (lock + snapshot + seed
+> + metadata por corrida) que cumple el criterio de aceptación. **CI completo:** además del job
+> `lint-type-test` (ruff, mypy de `wc26`+`wc26_api`, pytest) y `migrations` (alembic sobre Postgres
+> real), se añadió el job **`web`** (Node 22, `npm ci`, `tsc` estricto + `vite build`). README
+> actualizado a Fases 0–14 con secciones de API y Frontend. Cobertura: 106 tests (golden de
+> bracket, desempates, no-empates en knockout, leakage, calibración, API hermética). **Refinamientos
+> declarados como pendientes** (no bloqueantes, documentados en sus fases): Annex C exacto de
+> terceros (Phase 10), walk-forward por-cutoff completo (Phase 8), ingesta del ranking FIFA
+> (Phase 4) y challenger ML (Phase 9, a V2).
+
 - **Objetivo:** dejar el repo público profesional y reproducible.
 - **Entregables:** README final; cobertura de tests deportivos y de leakage; CI completo; guía de
   reproducción end-to-end.

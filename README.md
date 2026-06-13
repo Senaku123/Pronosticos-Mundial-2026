@@ -8,11 +8,13 @@ This is **not** an "AI predicts the World Cup" gimmick. It is a modular, reprodu
 explainable system grounded in statistics, careful backtesting, and honest uncertainty reporting.
 Every quality claim is measured against baselines; nothing is asserted without evaluation.
 
-> **Status:** Phases 0-14 implemented — data pipeline, anti-leakage Elo, calibrated Dixon-Coles
+> **Status:** Phases 0-15 implemented — data pipeline, anti-leakage Elo, calibrated Dixon-Coles
 > (GO gate passed), Monte Carlo simulator (2026 + historical 32-team backtest), the live
-> publish/score flow for the ongoing tournament, a thin FastAPI read layer (`apps/api`), and a
-> minimal React + Vite UI (`apps/web`, 3 screens with honest uncertainty). Phase 9 (challenger ML)
-> is deferred to V2 (documented decision). Next: Phase 15 (docs, tests & GitHub polish).
+> publish/score flow for the ongoing tournament, a thin FastAPI read layer (`apps/api`), a minimal
+> React + Vite UI (`apps/web`, 3 screens with honest uncertainty), and end-to-end reproduction docs
+> + full CI (lint/type/test, migrations, frontend build). Phase 9 (challenger ML) is deferred to V2;
+> documented refinements remain (exact Annex C third-place table, full walk-forward backtest).
+> See [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) to reproduce everything from zero.
 > Planning documents live in [`docs/`](docs/) and are written in Spanish (project guidance
 > language). All technical identifiers are in English.
 
@@ -81,6 +83,20 @@ honestly (Monte Carlo bands + calibration context). It consumes the API above; i
 npm --prefix apps/web install
 npm --prefix apps/web run dev      # http://localhost:5173  (API + DB must be running)
 ```
+
+## Run it all with Docker
+
+The whole app (PostgreSQL + API + web) runs in containers via a one-command launcher (Windows):
+
+```bat
+run.bat            REM build + start db + api + web   (web :8095, API :8090/docs)
+run.bat down       REM stop (the DB volume is kept)
+```
+
+It layers [`docker-compose.app.yml`](docker-compose.app.yml) (API + web, see [`docker/`](docker/))
+on top of the minimal db-only [`docker-compose.yml`](docker-compose.yml). The database must already
+hold data (run the pipeline once — see the Getting Started guide); the stack reuses the same volume.
+Non-Windows: `docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build`.
 
 ## Repository layout
 

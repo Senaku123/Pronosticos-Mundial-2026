@@ -1,0 +1,40 @@
+# Full app stack (API + web) layered ON TOP of the minimal db-only docker-compose.yml.
+# Always use both files together (the run.bat launcher does this):
+#   docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
+# Host ports are configurable (defaults avoid the common 8000/3000/8080): API_PORT, WEB_PORT.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: wc26_api
+    environment:
+      # Inside the network the database is reachable as `db`, not localhost.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-wc26}:${POSTGRES_PASSWORD:-change_me}@db:5432/${POSTGRES_DB:-wc26_forecast}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8090}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    container_name: wc26_web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8095}:80"
+    restart: unless-stopped

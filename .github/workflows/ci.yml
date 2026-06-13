@@ -24,6 +24,24 @@ jobs:
       - name: Pytest
         run: uv run pytest
 
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install dependencies (from lockfile)
+        run: npm ci
+      - name: Typecheck + build (tsc strict + vite)
+        run: npm run build
+
   migrations:
     runs-on: ubuntu-latest
     services:
