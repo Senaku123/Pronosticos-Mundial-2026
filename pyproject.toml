@@ -24,6 +24,12 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.9",
 ]
+# Phase 13: thin FastAPI transport layer. httpx powers Starlette's TestClient.
+api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+]
 notebooks = [
     "jupyter>=1.0",
     "matplotlib>=3.8",
@@ -38,15 +44,19 @@ packages = ["src/wc26"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "apps/api", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+# FastAPI uses Depends()/Query()/Path()/Body() as argument defaults by design (not B008 bugs).
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
+
 [tool.mypy]
 python_version = "3.11"
-packages = ["wc26"]
-mypy_path = "src"
+packages = ["wc26", "wc26_api"]
+mypy_path = "src:apps/api"
 strict = true
 
 # Third-party libraries without bundled type stubs.
@@ -62,4 +72,4 @@ disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "apps/api"]

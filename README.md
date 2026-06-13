@@ -8,9 +8,11 @@ This is **not** an "AI predicts the World Cup" gimmick. It is a modular, reprodu
 explainable system grounded in statistics, careful backtesting, and honest uncertainty reporting.
 Every quality claim is measured against baselines; nothing is asserted without evaluation.
 
-> **Status:** Phases 0-12 implemented — data pipeline, anti-leakage Elo, calibrated Dixon-Coles
-> (GO gate passed), Monte Carlo simulator (2026 + historical 32-team backtest) and the live
-> publish/score flow for the ongoing tournament. Next: FastAPI backend (Phase 13).
+> **Status:** Phases 0-14 implemented — data pipeline, anti-leakage Elo, calibrated Dixon-Coles
+> (GO gate passed), Monte Carlo simulator (2026 + historical 32-team backtest), the live
+> publish/score flow for the ongoing tournament, a thin FastAPI read layer (`apps/api`), and a
+> minimal React + Vite UI (`apps/web`, 3 screens with honest uncertainty). Phase 9 (challenger ML)
+> is deferred to V2 (documented decision). Next: Phase 15 (docs, tests & GitHub polish).
 > Planning documents live in [`docs/`](docs/) and are written in Spanish (project guidance
 > language). All technical identifiers are in English.
 
@@ -53,6 +55,32 @@ This project follows a binding methodological addendum
 Python (data, features, modeling, backtesting, simulation) · PostgreSQL (local; DataGrip as client)
 · SQLAlchemy + Alembic · pytest · FastAPI (backend, gated) · React + Vite (frontend, optional and
 non-blocking) · Jupyter (exploration only).
+
+## API (Phase 13)
+
+A thin FastAPI read layer lives in [`apps/api/`](apps/api/) (package `wc26_api`). It serves
+precomputed aggregates and runs only light per-match math (a single calibrated Dixon-Coles matrix);
+heavy Monte Carlo runs are precomputed by scripts and only read back. Run it against a live database:
+
+```bash
+uv run --group api uvicorn wc26_api.main:app --reload   # http://127.0.0.1:8000/docs
+```
+
+Endpoints: `GET /health`, `GET /teams`, `GET /teams/{team_id}`, `POST /predict-match`,
+`GET /scoreline-matrix`, `GET /tournament-probabilities`, `GET /tournament-simulations`,
+`POST /run-tournament-simulation`, `GET /backtest-results`, `GET /model-runs/{run_id}`.
+
+## Frontend (Phase 14, optional)
+
+A minimal React + Vite + TypeScript UI lives in [`apps/web/`](apps/web/) — three screens
+(tournament probabilities, match predictor, scoreline matrix), each communicating uncertainty
+honestly (Monte Carlo bands + calibration context). It consumes the API above; in dev, Vite proxies
+`/api/*` to the backend on port 8000.
+
+```bash
+npm --prefix apps/web install
+npm --prefix apps/web run dev      # http://localhost:5173  (API + DB must be running)
+```
 
 ## Repository layout
 

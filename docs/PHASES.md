@@ -183,6 +183,15 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 9 — Challenger ML models
 
+> **Estado: DIFERIDA (decisión 2026-06-12).** El motor base (Dixon-Coles calibrado) ya superó el
+> go/no-go de Phase 8 batiendo a Elo-only de forma estadísticamente significativa, por lo que un
+> challenger ML **no es prerequisito** para la API ni la web. Se mantiene como opcional y *gated*:
+> solo se incorporaría si bate las marginales de la matriz calibrada en log loss/Brier out-of-time
+> **de forma estable a través de todos los cutoffs** (no en un solo split). Riesgo de
+> sobre-ingeniería/colinealidad alto y beneficio incierto en V1 → se pospone a V2 (modelo
+> consciente de jugadores), donde habrá señal nueva que justifique el arsenal. No se implementa
+> `challenger.py` en V1.
+
 - **Objetivo:** evaluar si un modelo ML mejora las marginales de la matriz.
 - **Entregables:** `challenger_model` (logistic/ordinal regularizada + **un** GBM); admisión solo
   si bate out-of-time de forma estable; si se admite, re-normaliza la matriz.
@@ -293,6 +302,20 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 
 ## Phase 13 — FastAPI backend (gated)
 
+> **Estado: implementada (2026-06-12).** Capa fina `wc26_api` en `apps/api/` (depende de `src/`,
+> nunca al revés; test `test_src_does_not_import_api` lo verifica). Endpoints: `GET /health`
+> (liveness + conectividad BD + run congelado disponible), `GET /teams` + `GET /teams/{id}`
+> (Elo as-of opcional), `POST /predict-match` y `GET /scoreline-matrix` (única matemática por
+> request: **una** matriz Dixon-Coles **calibrada**; W/D/L sumada de zonas = única fuente de
+> verdad, `truncated_mass` explícito), `GET /tournament-probabilities` + `GET /tournament-simulations`
+> + `POST /run-tournament-simulation` (**solo lectura** de agregados precomputados; la API nunca
+> simula 50k síncronamente), `GET /backtest-results` y `GET /model-runs/{id}`. El motor congelado
+> (ρ + Platt) se **relee** del run oficial `wc2026`; si no está, los endpoints de motor devuelven
+> **503** en vez de re-ajustar (pesado). Grupo de dependencias `api` (fastapi/uvicorn/httpx);
+> 16 tests herméticos con SQLite en memoria (sin Postgres) cubren todos los endpoints, la
+> consistencia W/D/L y la dirección de dependencia. Levantar:
+> `uv run --group api uvicorn wc26_api.main:app --reload`.
+
 - **Objetivo:** exponer el motor vía API (capa fina).
 - **Entregables:** endpoints (`/health`, `/teams`, `/predict-match`, `/scoreline-matrix`,
   `/run-tournament-simulation`, `/tournament-probabilities`, `/backtest-results`,
@@ -304,6 +327,19 @@ criterios de aceptación, riesgos y qué **NO** hacer todavía.
 - **NO hacer todavía:** frontend si no hay valor claro.
 
 ## Phase 14 — React frontend (OPCIONAL, no-bloqueante)
+
+> **Estado: implementada (mínima, 2026-06-12).** SPA React + Vite + TypeScript en `apps/web/`
+> (depende de la API, nunca al revés). **3 pantallas** (no 9): (1) **Probabilidades** por selección
+> y fase (ordenable; el campeón se muestra con su **banda de error Monte Carlo 95%** y el contexto
+> de calibración), (2) **Predicción de partido** (W/D/L calibrado + goles esperados + marcadores
+> más probables, con datalist de equipos), (3) **Matriz de marcador** (heatmap + marginales +
+> `truncated_mass` explícito). Cliente `fetch` tipado contra los contratos de la API; en dev,
+> proxy de Vite `/api → :8000` (sin CORS). **Comunicación honesta de incertidumbre** en cada vista
+> + pie permanente (calibración Platt, banda MC, formato 48 sin análogo histórico, no es asesoría
+> de apuestas). `npm run build` (tsc estricto + vite) verde; verificado end-to-end contra
+> API+Postgres reales (Spain 20.3 %, Argentina 17.2 %). Tipos hand-written con script
+> `npm run gen:types` para regenerarlos desde OpenAPI. Levantar:
+> `npm --prefix apps/web install && npm --prefix apps/web run dev` (con la API y la BD activas).
 
 - **Objetivo:** UI solo si el go/no-go se superó y hay valor.
 - **Entregables:** pantallas mínimas (2–3 primero); comunicación honesta de incertidumbre; tipos TS
